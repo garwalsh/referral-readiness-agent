@@ -1,0 +1,51 @@
+# Local integration working copies
+/langcare-mcp-fhir/
+/openemr/
+
+# Environment variables and local configuration
+.env
+.env.*
+!.env.example
+.envrc
+.config/
+local-config/
+*.local.json
+*.local.toml
+*.local.yaml
+*.local.yml
+config.local.*
+secrets/
+credentials/
+secrets.*
+credentials.*
+
+# Keys and certificates
+.ssh/
+id_rsa*
+id_ed25519*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs, local databases, and dumps
+*.log
+logs/
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+*.dump
+*.sql.*
+dumps/
+
+.DS_Store
