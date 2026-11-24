@@ -49,3 +49,6 @@ logs/
 dumps/
 
 .DS_Store
+
+# Local evaluation reports and traces
+/evals/output/

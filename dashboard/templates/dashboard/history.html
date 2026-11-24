@@ -1,0 +1,35 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Run history · RRR Agent{% endblock %}
+{% block content %}
+<header class="page-heading"><h1>Run history</h1></header>
+<div class="panel table-wrap">
+  <table aria-label="Agent runs">
+    <thead>
+      <tr>
+        <th scope="col">Timestamp (UTC)</th><th scope="col">Run ID</th><th scope="col">User</th>
+        <th scope="col">Patient ID</th><th scope="col">Model</th><th scope="col">Readiness</th>
+        <th scope="col">Duration</th><th scope="col">Tool calls</th><th scope="col">Outcome</th>
+      </tr>
+    </thead>
+    <tbody>{% for run in page_obj %}
+      <tr>
+        <td class="nowrap">{{ run.created_at|date:"Y-m-d H:i" }}</td>
+        <td class="identifier"><a href="{% url 'run_detail' run.pk %}">{{ run.pk }}</a></td>
+        <td>{{ run.created_by.get_username }}</td>
+        <td class="identifier">{{ run.patient_id }}</td>
+        <td class="nowrap">{{ run.model }}</td>
+        <td>{% if run.readiness %}<span class="status" data-status="{{ run.readiness }}">{{ run.readiness }}</span>{% else %}—{% endif %}</td>
+        <td class="nowrap">{% if run.duration_seconds != None %}{{ run.duration_seconds }} s{% else %}—{% endif %}</td>
+        <td>{{ run.tool_calls }}</td><td>{{ run.get_state_display }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="9" class="empty-cell">No reviews recorded.</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% if page_obj.has_other_pages %}
+<div class="pagination">
+  {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+  <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+  {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

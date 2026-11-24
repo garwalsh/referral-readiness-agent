@@ -1,0 +1,186 @@
+"""Authentication, CSRF, and configuration-page smoke tests."""
+
+import json
+import subprocess
+from datetime import date, timedelta
+from unittest.mock import patch
+from uuid import uuid4
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from django.contrib.auth import get_user_model
+from django.test import Client, TestCase, override_settings
+from django.urls import reverse
+from django.utils import timezone
+
+from scripts.reporting import CHECKLIST, Finding, FindingStatus, Report, readiness_for
+
+from .models import ReviewRun
+from .worker import claim_next, execute_run, read_events, trace_path
+
+
+@override_settings(SECURE_SSL_REDIRECT=False, SESSION_COOKIE_SECURE=False, CSRF_COOKIE_SECURE=False)
+class DashboardPagesTest(TestCase):
+    patient = "a34c2416-8263-4819-9acf-690e2e6fdd01"
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        users = get_user_model()
+        cls.admin = users.objects.create_superuser("demo-admin", password="test-door-key-459")
+        cls.viewer = users.objects.create_user("viewer", password="test-door-key-459")
+
+    def test_application_pages_require_login(self) -> None:
+        for name in ("run_agent", "results", "history"):
+            url = reverse(name)
+            with self.subTest(page=name):
+                self.assertRedirects(self.client.get(url), f"{reverse('login')}?next={url}")
+
+    def test_login_requires_administrator_and_csrf(self) -> None:
+        client = Client(enforce_csrf_checks=True)
+        url = reverse("login")
+        credentials = {"username": self.admin.username, "password": "test-door-key-459"}
+        self.assertEqual(client.post(url, credentials).status_code, 403)
+        self.assertContains(client.get(url), "Administrator sign-in")
+        credentials["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
+        viewer = dict(credentials, username=self.viewer.username)
+        self.assertContains(client.post(url, viewer), "dashboard administrator account")
+        self.assertRedirects(client.post(url, credentials), reverse("run_agent"))
+        self.assertEqual(client.get(reverse("logout")).status_code, 405)
+        credentials["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
+        self.assertRedirects(client.post(reverse("logout"), credentials), reverse("login"))
+
+    def test_non_admin_session_cannot_view_dashboard(self) -> None:
+        self.client.force_login(self.viewer)
+        self.assertEqual(self.client.get(reverse("run_agent")).status_code, 302)
+
+    def test_configuration_uses_fixture_ids_and_configured_models(self) -> None:
+        self.client.force_login(self.admin)
+        with TemporaryDirectory() as directory:
+            fixture_map = Path(directory) / "fixture-map.json"
+            fixture_map.write_text(json.dumps({"offline-id": {"patient": self.patient, "note": "EXCLUDED_TEXT"}}))
+            with self.settings(RRR_FIXTURE_MAP=fixture_map, RRR_CLAUDE_MODELS=("claude-sonnet-4-6",)):
+                response = self.client.get(reverse("run_agent"))
+        self.assertContains(response, self.patient)
+        self.assertContains(response, "claude-sonnet-4-6")
+        self.assertNotContains(response, "claude-haiku-5-5")
+        self.assertContains(response, 'value="2026-11-25"')
+        self.assertNotContains(response, "EXCLUDED_TEXT")
+        self.assertContains(response, "Run Review")
+
+    def test_missing_fixture_map_and_empty_pages_render(self) -> None:
+        self.client.force_login(self.admin)
+        with TemporaryDirectory() as directory:
+            with self.settings(RRR_FIXTURE_MAP=Path(directory) / "missing.json"):
+                self.assertContains(self.client.get(reverse("run_agent")), "fixture ID map is unavailable")
+        self.assertContains(self.client.get(reverse("results")), "No report selected")
+        self.assertContains(self.client.get(reverse("history")), "No reviews recorded.")
+        self.assertEqual(self.client.post(reverse("run_agent"), {"patient_id": "invalid"}).status_code, 400)
+
+
+    def test_queue_submission_validates_patient_and_model(self) -> None:
+        self.client.force_login(self.admin)
+        with TemporaryDirectory() as directory:
+            fixture_map = Path(directory) / "fixture-map.json"
+            fixture_map.write_text(json.dumps({"offline-id": {"patient": self.patient}}))
+            with self.settings(RRR_FIXTURE_MAP=fixture_map):
+                url = reverse("run_agent")
+                form = {"patient_id": self.patient, "model": "claude-sonnet-4-6", "review_date": "2026-11-25"}
+                self.assertEqual(self.client.post(url, dict(form, patient_id=str(uuid4()))).status_code, 400)
+                self.assertEqual(self.client.post(url, dict(form, model="unverified")).status_code, 400)
+                self.assertEqual(ReviewRun.objects.count(), 0)
+                response = self.client.post(url, form)
+        run = ReviewRun.objects.get()
+        self.assertEqual(run.created_by, self.admin)
+        self.assertEqual(run.model, "claude-sonnet-4-6")
+        self.assertEqual(run.review_date, date(2026, 11, 25))
+        self.assertEqual(run.state, ReviewRun.State.QUEUED)
+        self.assertRedirects(response, reverse("run_detail", args=[run.id]))
+        self.assertEqual(self.client.get(reverse("run_progress", args=[run.id])).json(),
+                         {"state": "Queued", "terminal": False, "events": []})
+        self.client.logout()
+        for name in ("run_detail", "run_progress"):
+            self.assertEqual(self.client.get(reverse(name, args=[run.id])).status_code, 302)
+
+
+class ReviewWorkerTest(TestCase):
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.admin = get_user_model().objects.create_superuser("worker-test")
+
+    def setUp(self) -> None:
+        temp = TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        path = Path(temp.name)
+        fixture_map = path / "fixture-map.json"
+        fixture_map.write_text(json.dumps({"fixture": {"patient": DashboardPagesTest.patient}}))
+        config = override_settings(RRR_RUN_DIR=path, RRR_FIXTURE_MAP=fixture_map,
+                                   SECURE_SSL_REDIRECT=False, CSRF_COOKIE_SECURE=False)
+        config.enable()
+        self.addCleanup(config.disable)
+
+    def queue(self) -> ReviewRun:
+        return ReviewRun.objects.create(
+            created_by=self.admin, patient_id=DashboardPagesTest.patient,
+            model="claude-sonnet-4-6", review_date=date(2026, 11, 25),
+        )
+
+    def test_worker_keeps_runner_report_and_actual_events(self) -> None:
+        run = self.queue()
+        claimed = claim_next()
+        self.assertEqual(claimed.pk, run.pk)
+        self.assertIsNone(claim_next())
+        findings = [Finding(requirement_id=key, status=FindingStatus.MISSING,
+                            evidence=[], explanation="Documentation not found.") for key in CHECKLIST]
+        report = Report(patient_id=str(run.patient_id), review_date=run.review_date, findings=findings,
+                        readiness=readiness_for(findings), retrieval_errors=[], uncertainties=[])
+        events = [
+            {"event": "start", "run_id": str(run.id), "model": run.model,
+             "patient_id": str(run.patient_id), "review_date": run.review_date.isoformat()},
+            {"event": "tool", "tool": "fhir_search", "parameters": {"resourceType": "DiagnosticReport"},
+             "result": {"count": 0}},
+            {"event": "validation_finish", "failures": 0},
+            {"event": "finish", "run_id": str(run.id), "readiness": report.readiness.value},
+        ]
+
+        def run_cli(command, **kwargs):
+            self.assertEqual(command[command.index("--model") + 1], run.model)
+            self.assertEqual(command[command.index("--run-id") + 1], str(run.pk))
+            self.assertNotIn("DJANGO_SECRET_KEY", kwargs["env"])
+            path = Path(command[command.index("--trace-path") + 1])
+            path.write_text("".join(json.dumps(event) + "\n" for event in events))
+            return subprocess.CompletedProcess(command, 0, stdout=report.model_dump_json())
+
+        with patch("dashboard.worker.subprocess.run", side_effect=run_cli):
+            execute_run(claimed)
+        run.refresh_from_db()
+        self.assertEqual(run.state, ReviewRun.State.COMPLETED)
+        self.assertEqual(run.readiness, "NEEDS_REVIEW")
+        self.assertEqual(run.tool_calls, 1)
+        self.client.force_login(self.admin)
+        self.assertContains(self.client.get(reverse("history")), str(run.pk))
+        self.assertContains(self.client.get(reverse("run_detail", args=[run.pk])), "Documentation findings")
+        progress = self.client.get(reverse("run_progress", args=[run.pk])).json()
+        self.assertTrue(progress["terminal"])
+        self.assertEqual([event["label"] for event in progress["events"]],
+                         ["Agent started", "Tool completed", "Report validation finished", "Readiness calculated"])
+
+    def test_partial_line_is_hidden_and_failed_process_is_audited(self) -> None:
+        run = self.queue()
+        claimed = claim_next()
+        trace_path(run).write_text('{"event":"start"}\n{"event":')
+        self.assertEqual(read_events(run), [{"event": "start"}])
+        result = subprocess.CompletedProcess([], 1, stdout="", stderr="SECRET_TRACE_TEXT")
+        with patch("dashboard.worker.subprocess.run", return_value=result):
+            execute_run(claimed)
+        run.refresh_from_db()
+        self.assertEqual(run.state, ReviewRun.State.FAILED)
+        self.assertNotIn("SECRET_TRACE_TEXT", run.error)
+        self.assertTrue(run.finished_at)
+
+    def test_expired_worker_claim_is_failed_without_retry(self) -> None:
+        run = self.queue()
+        claim_next()
+        ReviewRun.objects.filter(pk=run.pk).update(started_at=timezone.now() - timedelta(hours=1))
+        self.assertIsNone(claim_next())
+        run.refresh_from_db()
+        self.assertEqual(run.state, ReviewRun.State.FAILED)

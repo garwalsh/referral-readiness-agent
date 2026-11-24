@@ -1,0 +1,30 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}RRR Agent{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'dashboard/dashboard.css' %}">
+</head>
+<body>
+{% block body %}
+<div class="layout">
+  <aside class="sidebar">
+    <a class="identity" href="{% url 'run_agent' %}">RRR Agent</a>
+    <nav aria-label="Dashboard">
+      <a href="{% url 'run_agent' %}"{% if active_page == 'run_agent' %} aria-current="page"{% endif %}>Run agent</a>
+      <a href="{% url 'results' %}"{% if active_page == 'results' %} aria-current="page"{% endif %}>Run results</a>
+      <a href="{% url 'history' %}"{% if active_page == 'history' %} aria-current="page"{% endif %}>Run history</a>
+    </nav>
+    <form class="account" method="post" action="{% url 'logout' %}">
+      {% csrf_token %}
+      <span class="account-name">{{ request.user.get_username }}</span>
+      <button type="submit">Sign out</button>
+    </form>
+  </aside>
+  <main class="main">{% block content %}{% endblock %}</main>
+</div>
+{% endblock %}
+</body>
+</html>

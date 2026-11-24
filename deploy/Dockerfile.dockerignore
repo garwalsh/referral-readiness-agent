@@ -1,0 +1,14 @@
+**
+!requirements.txt
+!manage.py
+!dashboard/
+!dashboard/**
+!scripts/
+!scripts/run_agent.py
+!scripts/reporting.py
+!scripts/verify_langcare.py
+!deploy/
+!deploy/requirements.txt
+!deploy/Dockerfile
+**/__pycache__/
+**/*.pyc

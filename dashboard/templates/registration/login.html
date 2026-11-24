@@ -1,0 +1,18 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Sign in · RRR Agent{% endblock %}
+{% block body %}
+<main class="login">
+  <section class="panel login-panel" aria-labelledby="login-title">
+    <p class="product-name">Referral Readiness Review</p>
+    <h1 id="login-title">Administrator sign-in</h1>
+    <form method="post" action="{% url 'login' %}">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <div class="field">{{ form.username.label_tag }}{{ form.username }}{{ form.username.errors }}</div>
+      <div class="field">{{ form.password.label_tag }}{{ form.password }}{{ form.password.errors }}</div>
+      {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+      <button type="submit" class="primary">Sign in</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

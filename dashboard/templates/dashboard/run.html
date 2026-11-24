@@ -1,0 +1,26 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Run agent · RRR Agent{% endblock %}
+{% block content %}
+<header class="page-heading">
+  <h1>Run agent</h1>
+  <p>Review documentation for a synthetic cardiology referral.</p>
+</header>
+<section class="panel run-panel" aria-labelledby="config-title">
+  <h2 id="config-title">Review configuration</h2>
+  {% if fixture_error %}
+  <p class="notice" role="status">The live fixture ID map is unavailable. Check the dashboard's fixture map setting.</p>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="field">{{ form.patient_id.label_tag }}{{ form.patient_id }}{{ form.patient_id.errors }}</div>
+    <div class="field-row">
+      <div class="field">{{ form.model.label_tag }}{{ form.model }}{{ form.model.errors }}</div>
+      <div class="field">{{ form.review_date.label_tag }}{{ form.review_date }}{{ form.review_date.errors }}</div>
+    </div>
+    <div class="panel-footer">
+      <button type="submit" class="primary"{% if not can_run %} disabled{% endif %}>Run Review</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

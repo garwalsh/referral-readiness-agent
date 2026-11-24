@@ -9,7 +9,7 @@ import json
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from itertools import count
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -230,6 +230,7 @@ class PatientTools:
 
 
 def write_event(trace: TextIO, event: Json) -> None:
+    event = {"timestamp": datetime.now(timezone.utc).isoformat(), **event}
     trace.write(json.dumps(event, ensure_ascii=False) + "\n")
     trace.flush()
 
@@ -244,6 +245,7 @@ def trace_tool(tools: PatientTools, block: Json, trace: TextIO, remaining: int) 
         if not isinstance(block["input"], dict):
             raise ValueError("Tool input must be a JSON object.")
         entry["parameters"] = tools.parameters(block["name"], block["input"])
+        write_event(trace, {"event": "tool_start", "tool": block["name"], "parameters": entry["parameters"]})
         raw, result = tools.retrieve(block["name"], entry["parameters"])
         # Trace resource identifiers and coverage, without storing note bodies or values.
         resources = [item["resource"] for item in raw.get("entry", [])] if block["name"] == "fhir_search" else [raw]
@@ -342,6 +344,8 @@ def main() -> None:
         "--model",
         help=f"Claude model ID (overrides ANTHROPIC_MODEL, otherwise defaults to {DEFAULT_MODEL})",
     )
+    parser.add_argument("--run-id", type=UUID, help="Identifier supplied by the dashboard worker")
+    parser.add_argument("--trace-path", type=Path, help="Write the trace to a new file at this path")
     args = parser.parse_args()
 
     config = settings()
@@ -351,12 +355,18 @@ def main() -> None:
         parser.error("Set these variables in the environment or project .env: " + ", ".join(missing))
     model = args.model or config.get("ANTHROPIC_MODEL") or DEFAULT_MODEL
     logs = ROOT / "logs"
-    logs.mkdir(mode=0o700, exist_ok=True)
-    run_id = str(uuid4())
+    if not args.trace_path:
+        logs.mkdir(mode=0o700, exist_ok=True)
+    run_id = str(args.run_id or uuid4())
     patient_id = str(args.patient_id)
     started = perf_counter()
-    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=logs, prefix="rrr-",
-                            suffix=".jsonl", delete=False) as trace:
+    # Keep the original CLI behavior when no dashboard trace path is supplied.
+    output = (
+        open(args.trace_path, "x", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600))
+        if args.trace_path else NamedTemporaryFile(mode="w", encoding="utf-8", dir=logs, prefix="rrr-",
+                                                   suffix=".jsonl", delete=False)
+    )
+    with output as trace:
         print(f"Claude model: {model}\nTrace: {trace.name}", file=sys.stderr)
         write_event(trace, {"event": "start", "run_id": run_id, "patient_id": patient_id,
                             "review_date": args.review_date.isoformat(), "model": model})
@@ -380,6 +390,7 @@ def main() -> None:
             else:
                 failure = f"Checklist drafting failed ({detail})."
             write_event(trace, {"event": "run_error", "message": failure})
+        write_event(trace, {"event": "validation_start"})
         report, validation_errors = build_report(
             draft, patient_id, args.review_date,
             tools.retrieved if tools else {}, tools.complete_searches if tools else set(),
@@ -387,6 +398,7 @@ def main() -> None:
         )
         for message in validation_errors:
             write_event(trace, {"event": "validation_error", "message": message})
+        write_event(trace, {"event": "validation_finish", "failures": len(validation_errors)})
         write_event(trace, {"event": "finish", "run_id": run_id,
                             "statuses": {item.requirement_id.value: item.status.value for item in report.findings},
                             "readiness": report.readiness.value,

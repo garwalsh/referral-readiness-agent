@@ -1,0 +1,35 @@
+x-runtime: &runtime
+  image: rrr-dashboard:local
+  restart: unless-stopped
+  init: true
+  volumes:
+    - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/data:/var/lib/rrr
+    - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/fixture-ids.json:/etc/rrr/fixture-ids.json:ro
+
+services:
+  dashboard:
+    <<: *runtime
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/dashboard.env
+    command: gunicorn dashboard.wsgi --bind 0.0.0.0:8000 --workers 2 --access-logfile -
+    networks:
+      proxy:
+        aliases:
+          - rrr-dashboard
+
+  worker:
+    <<: *runtime
+    env_file:
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/dashboard.env
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/runner.env
+    command: python manage.py run_review_worker
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: rrr_default

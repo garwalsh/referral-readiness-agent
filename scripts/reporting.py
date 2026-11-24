@@ -6,7 +6,7 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class Requirement(str, Enum):
@@ -92,6 +92,9 @@ class EvidenceReference(ClosedModel):
     resource_type: EvidenceType
     resource_id: str
     date: date
+    excerpts: list[str] = Field(default_factory=list)
+    measurement: Optional[str] = None
+    encounter_reference: Optional[str] = None
 
 
 class Finding(ClosedModel):
@@ -171,19 +174,25 @@ def verify_support(
     if day > review_date:
         raise ValueError("A citation is dated after the review date.")
 
+    excerpt, measurement = None, None
     if item.component in VITAL_CODES:
         if item.resource_type != "Observation" or VITAL_CODES[item.component] not in codes(resource):
             raise ValueError("A vital-sign citation has the wrong resource type or code.")
         if item.component == Component.BP:
             measured = {
-                code for part in resource.get("component", [])
-                if has_measurement(part)
+                code: part["valueQuantity"]["value"]
+                for part in resource.get("component", []) if has_measurement(part)
                 for code in codes(part)
             }
-            if not {"8480-6", "8462-4"} <= measured:
+            if not {"8480-6", "8462-4"} <= measured.keys():
                 raise ValueError("Cited blood pressure has no complete measured reading.")
+            measurement = f"{measured['8480-6']:g}/{measured['8462-4']:g} mmHg"
         elif not has_measurement(resource):
             raise ValueError("Cited heart rate has no measured reading.")
+        else:
+            quantity = resource["valueQuantity"]
+            unit = quantity.get("unit") or quantity.get("code") or ""
+            measurement = f"{quantity['value']:g} {unit}".strip()
     else:
         # Exact excerpts verify the source exists. Claude still interprets what the text supports.
         if item.resource_type != "DiagnosticReport" or not item.quote or not item.quote.strip():
@@ -192,7 +201,14 @@ def verify_support(
         if not any(excerpt in " ".join(note.split()) for note in resource.get("notes", [])):
             raise ValueError("A cited excerpt does not occur in the retrieved report.")
 
-    return EvidenceReference(resource_type=item.resource_type, resource_id=item.resource_id, date=day)
+    # Persist only a short, verified excerpt or measurement for the report display.
+    encounter = resource.get("encounter") or {}
+    reference = encounter.get("reference")
+    return EvidenceReference(
+        resource_type=item.resource_type, resource_id=item.resource_id, date=day,
+        excerpts=[excerpt[:240]] if excerpt else [], measurement=measurement,
+        encounter_reference=reference if isinstance(reference, str) else None,
+    )
 
 
 def validate_finding(
@@ -215,8 +231,14 @@ def validate_finding(
         required_searches.add("Observation")
     complete = required_searches <= complete_searches
     unsupported = [component.value.replace("_", " ") for component in required if component not in support]
-    evidence = list({(item.resource_type, item.resource_id): item
-                     for references in support.values() for item in references}.values())
+    combined: dict[tuple[str, str], EvidenceReference] = {}
+    for references in support.values():
+        for item in references:
+            current = combined.setdefault((item.resource_type, item.resource_id), item)
+            current.excerpts = list(dict.fromkeys([*current.excerpts, *item.excerpts]))
+            if item.measurement and item.measurement != current.measurement:
+                current.measurement = ", ".join(filter(None, (current.measurement, item.measurement)))
+    evidence = list(combined.values())
     status = draft.status
     if draft.requirement_id == Requirement.ECG and status in {FindingStatus.PRESENT, FindingStatus.OUTDATED}:
         if not evidence:
