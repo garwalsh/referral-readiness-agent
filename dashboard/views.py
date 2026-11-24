@@ -1,5 +1,6 @@
 """Administrator views for queueing, following, and inspecting reviews."""
 
+from collections import Counter
 import json
 from uuid import UUID
 
@@ -24,6 +25,17 @@ REQUIREMENT_LABELS = {
     "physical_assessment": "Physical assessment",
     "ecg": "ECG documentation",
     "relevant_history": "Relevant history",
+}
+REQUIREMENT_STATUSES = {
+    "PRESENT": ("Satisfied", "✓"),
+    "MISSING": ("Missing", "−"),
+    "OUTDATED": ("Outdated", "◷"),
+    "UNKNOWN": ("Unresolved", "?"),
+}
+READINESS_LABELS = {
+    "READY": "Documentation requirements satisfied",
+    "NEEDS_REVIEW": "Documentation needs review",
+    "UNABLE_TO_ASSESS": "Some requirements could not be assessed",
 }
 EVENT_LABELS = {
     "start": "Agent started",
@@ -119,11 +131,18 @@ def results(request: HttpRequest) -> HttpResponse:
 def run_detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
     run = get_object_or_404(ReviewRun.objects.select_related("created_by"), pk=run_id)
     findings = [
-        {**item, "label": REQUIREMENT_LABELS[item["requirement_id"]]}
+        {**item, "label": REQUIREMENT_LABELS[item["requirement_id"]],
+         "status_icon": REQUIREMENT_STATUSES.get(item["status"], ("", ""))[1]}
         for item in (run.report or {}).get("findings", [])
     ]
+    counts = Counter(item["status"] for item in findings)
     return render(request, "dashboard/detail.html", {
         "active_page": "results", "run": run, "findings": findings,
+        "readiness_label": READINESS_LABELS.get(run.readiness),
+        "requirement_counts": [
+            {"status": status, "label": label, "count": counts[status]}
+            for status, (label, _) in REQUIREMENT_STATUSES.items()
+        ],
         "events": timeline(run, include_citation_diagnostics=True),
     })
 

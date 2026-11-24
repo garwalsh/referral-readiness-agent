@@ -1,50 +1,87 @@
 {% extends 'dashboard/base.html' %}
 {% load static %}
-{% block title %}Run report · RRR Agent{% endblock %}
+{% block title %}Referral readiness review · RRR Agent{% endblock %}
 {% block content %}
+<div class="report-page">
 <header class="page-heading">
-  <h1>Run report</h1>
-  <p class="identifier">{{ run.id }}</p>
+  <a class="page-back" href="{% url 'history' %}"><span aria-hidden="true">←</span> Run history</a>
+  <h1>Referral readiness review</h1>
 </header>
-<section class="panel report-summary" aria-label="Run overview">
-  <div class="summary-status">
-    {% if run.readiness %}<span class="status" data-status="{{ run.readiness }}">{{ run.readiness }}</span>{% endif %}
-    <p id="run-state" aria-live="polite">{{ run.get_state_display }}</p>
+<section class="panel report-summary run-overview" aria-labelledby="readiness-title">
+  <div class="run-overview-main">
+    <div>
+      {% if run.readiness %}
+      <span class="status readiness-badge" data-status="{{ run.readiness }}">{{ run.readiness }}</span>
+      <h2 id="readiness-title">{{ readiness_label|default:run.readiness }}</h2>
+      {% elif run.terminal %}
+      <h2 id="readiness-title">Documentation report unavailable</h2>
+      {% else %}
+      <h2 id="readiness-title">Awaiting documentation report</h2>
+      {% endif %}
+    </div>
+    <div class="run-execution">
+      <span class="secondary">Execution</span>
+      <p id="run-state" aria-live="polite">{{ run.get_state_display }}</p>
+    </div>
   </div>
-  <dl class="run-metadata">
-    <div><dt>FHIR patient ID</dt><dd class="identifier">{{ run.patient_id }}</dd></div>
-    <div><dt>Review date</dt><dd>{{ run.review_date|date:"Y-m-d" }}</dd></div>
+  {% if findings %}
+  <dl class="requirement-counts" aria-label="Checklist summary">
+    {% for item in requirement_counts %}
+    <div class="requirement-count" data-status="{{ item.status }}" data-count="{{ item.count }}">
+      <dt>{{ item.label }}</dt><dd>{{ item.count }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  {% endif %}
+  {% if run.error %}<p class="notice" role="status">{{ run.error }}</p>{% endif %}
+  <dl class="run-metadata report-metadata">
     <div><dt>Claude model</dt><dd>{{ run.model }}</dd></div>
+    <div><dt>Review date</dt><dd>{{ run.review_date|date:"Y-m-d" }}</dd></div>
     <div><dt>Duration</dt><dd>{% if run.duration_seconds != None %}{{ run.duration_seconds }} s{% else %}—{% endif %}</dd></div>
     <div><dt>Tool calls</dt><dd>{% if run.terminal %}{{ run.tool_calls }}{% else %}—{% endif %}</dd></div>
   </dl>
-  {% if run.error %}<p class="notice" role="status">{{ run.error }}</p>{% endif %}
+  <dl class="report-identifiers">
+    <div>
+      <dt>FHIR patient ID</dt>
+      <dd><code class="identifier" id="report-patient-id">{{ run.patient_id }}</code>
+        <button class="copy-id" type="button" data-copy-id="report-patient-id" data-copy-label="Patient ID" aria-label="Copy patient ID" hidden>Copy</button></dd>
+    </div>
+    <div>
+      <dt>Run ID</dt>
+      <dd><code class="identifier" id="report-run-id">{{ run.id }}</code>
+        <button class="copy-id" type="button" data-copy-id="report-run-id" data-copy-label="Run ID" aria-label="Copy run ID" hidden>Copy</button></dd>
+    </div>
+  </dl>
+  <p id="copy-feedback" class="secondary copy-feedback" role="status"></p>
 </section>
 {% if findings %}
 <section class="report-findings" aria-labelledby="findings-title">
   <h2 id="findings-title">Documentation findings</h2>
-  {% for finding in findings %}
-  <article class="panel finding">
-    <div class="finding-heading">
-      <h3>{{ finding.label }}</h3>
-      <span class="status" data-status="{{ finding.status }}">{{ finding.status }}</span>
-    </div>
-    <p>{{ finding.explanation }}</p>
-    {% if finding.evidence %}
-    <details>
-      <summary>Supporting evidence ({{ finding.evidence|length }})</summary>
-      <ul class="evidence-list">{% for evidence in finding.evidence %}
-        <li>
-          <p class="identifier"><strong>{{ evidence.resource_type }}/{{ evidence.resource_id }}</strong></p>
-          <p class="secondary">{{ evidence.date }}{% if evidence.encounter_reference %} · {{ evidence.encounter_reference }}{% endif %}</p>
-          {% if evidence.measurement %}<p class="measurement">{{ evidence.measurement }}</p>{% endif %}
-          {% for excerpt in evidence.excerpts %}<blockquote>{{ excerpt }}</blockquote>{% endfor %}
-        </li>
-      {% endfor %}</ul>
+  <div class="panel checklist">
+    {% for finding in findings %}
+    <details class="checklist-row" data-status="{{ finding.status }}">
+      <summary class="checklist-summary">
+        <span class="checklist-name">{{ finding.label }}</span>
+        <span class="status" data-status="{{ finding.status }}"><span aria-hidden="true">{{ finding.status_icon }}</span> {{ finding.status }}</span>
+        <span class="checklist-toggle">{% if finding.evidence %}Supporting evidence ({{ finding.evidence|length }}){% else %}Details{% endif %}</span>
+        {% if finding.status != 'PRESENT' %}<span class="checklist-explanation">{{ finding.explanation }}</span>{% endif %}
+      </summary>
+      <div class="checklist-content">
+        {% if finding.status == 'PRESENT' %}<p>{{ finding.explanation }}</p>{% endif %}
+        {% if finding.evidence %}
+        <ul class="evidence-list">{% for evidence in finding.evidence %}
+          <li>
+            <p class="identifier"><strong>{{ evidence.resource_type }}/{{ evidence.resource_id }}</strong></p>
+            <p class="secondary">{{ evidence.date }}{% if evidence.encounter_reference %} · {{ evidence.encounter_reference }}{% endif %}</p>
+            {% if evidence.measurement %}<p class="measurement">{{ evidence.measurement }}</p>{% endif %}
+            {% for excerpt in evidence.excerpts %}<blockquote>{{ excerpt }}</blockquote>{% endfor %}
+          </li>
+        {% endfor %}</ul>
+        {% else %}<p class="secondary">No supporting evidence recorded.</p>{% endif %}
+      </div>
     </details>
-    {% endif %}
-  </article>
-  {% endfor %}
+    {% endfor %}
+  </div>
   {% if run.report.uncertainties or run.report.retrieval_errors %}
   <section class="panel reconciliation" aria-labelledby="issues-title">
     <h3 id="issues-title">Retrieval issues and uncertainties</h3>
@@ -70,7 +107,7 @@
           {% if event.resource_count != None %}<span>{{ event.resource_count }} returned</span>{% endif %}
           <span class="secondary">{{ event.status }}</span>
         </summary>
-        {% if event.timestamp %}<p class="secondary">{{ event.timestamp }}</p>{% endif %}
+        {% if event.timestamp %}<p class="secondary"><time datetime="{{ event.timestamp }}">{{ event.timestamp }}</time></p>{% endif %}
         {% if event.duration_ms != None %}<p>Duration {{ event.duration_ms }} ms</p>{% endif %}
         {% if event.readiness %}<p>{{ event.readiness }}</p>{% endif %}
         {% for key, value in event.parameters.items %}<p class="identifier">{{ key }} · {{ value }}</p>{% endfor %}
@@ -90,10 +127,12 @@
       </details>
     </li>
   {% empty %}
-    <li class="secondary">No agent events recorded yet.</li>
+    <li class="secondary">{% if run.terminal %}No trace events were recorded.{% else %}Waiting for the first trace event.{% endif %}</li>
   {% endfor %}
   </ol>
   <p id="progress-error" class="secondary" role="status" hidden>Progress is temporarily unavailable. Retrying.</p>
 </section>
+</div>
+<script src="{% static 'dashboard/copy-identifiers.js' %}" defer></script>
 {% if not run.terminal %}<script src="{% static 'dashboard/progress.js' %}" defer></script>{% endif %}
 {% endblock %}

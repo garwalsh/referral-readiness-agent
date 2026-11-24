@@ -158,11 +158,27 @@ class ReviewWorkerTest(TestCase):
         self.assertEqual(run.tool_calls, 1)
         self.client.force_login(self.admin)
         self.assertContains(self.client.get(reverse("history")), str(run.pk))
-        self.assertContains(self.client.get(reverse("run_detail", args=[run.pk])), "Documentation findings")
+        detail = self.client.get(reverse("run_detail", args=[run.pk]))
+        self.assertContains(detail, "Documentation needs review")
+        self.assertContains(detail, 'data-status="MISSING" data-count="5"')
+        self.assertContains(detail, 'class="checklist-row" data-status="MISSING"', count=5)
+        self.assertContains(detail, "Documentation not found.", count=5)
+        self.assertContains(detail, 'aria-label="Copy patient ID"')
+        self.assertContains(detail, 'aria-label="Copy run ID"')
+        self.assertContains(detail, "Documentation findings")
         progress = self.client.get(reverse("run_progress", args=[run.pk])).json()
         self.assertTrue(progress["terminal"])
         self.assertEqual([event["label"] for event in progress["events"]],
                          ["Agent started", "Tool completed", "Report validation finished", "Readiness calculated"])
+
+    def test_queued_review_shows_execution_without_a_documentation_result(self) -> None:
+        run = self.queue()
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("run_detail", args=[run.pk]))
+        self.assertContains(response, "Awaiting documentation report")
+        self.assertContains(response, 'id="run-state" aria-live="polite">Queued')
+        self.assertContains(response, "Waiting for the first trace event.")
+        self.assertNotContains(response, "Checklist summary")
 
     def test_citation_diagnostics_are_private_to_the_admin_run_detail(self) -> None:
         run = self.queue()

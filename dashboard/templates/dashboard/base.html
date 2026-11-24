@@ -9,6 +9,7 @@
 </head>
 <body>
 {% block body %}
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div class="layout">
   <aside class="sidebar">
     <a class="identity" href="{% url 'run_agent' %}">RRR Agent</a>
@@ -24,7 +25,7 @@
       <button type="submit">Sign out</button>
     </form>
   </aside>
-  <main class="main">{% block content %}{% endblock %}</main>
+  <main class="main" id="main-content" tabindex="-1">{% block content %}{% endblock %}</main>
 </div>
 {% endblock %}
 </body>
