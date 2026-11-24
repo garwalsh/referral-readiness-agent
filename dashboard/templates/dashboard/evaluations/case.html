@@ -1,0 +1,66 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Evaluation case · RRR Agent{% endblock %}
+{% block content %}
+<header class="page-heading">
+  <a href="{% url 'evaluation_detail' run.evaluation_run_id %}">Evaluation details</a>
+  <h1>{{ case.scenario|capfirst }}</h1>
+  <p class="identifier">{{ case.fixture_id }}</p>
+</header>
+<section class="panel report-summary" aria-label="Case summary">
+  {% include 'dashboard/evaluations/outcome.html' %}
+  <dl class="run-metadata">
+    <div><dt>Expected readiness</dt><dd>{{ case.expected_readiness.value }}</dd></div>
+    <div><dt>Actual readiness</dt><dd>{{ case.actual_readiness.value|default:"No report" }}</dd></div>
+    <div><dt>Citation validation</dt><dd>{{ case.citations_valid|yesno:"Passed,Did not pass" }}</dd></div>
+    <div><dt>Tool calls</dt><dd>{{ case.tool_calls }}</dd></div>
+  </dl>
+  {% include 'dashboard/evaluations/issues.html' %}
+  {% if not report_available %}<p class="notice">Supporting evidence is unavailable because the case report is missing or unreadable.</p>{% endif %}
+</section>
+<section class="report-findings" aria-labelledby="findings-title">
+  <h2 id="findings-title">Checklist requirements</h2>
+  {% for finding in findings %}
+  <article class="panel finding{% if finding.mismatch %} evaluation-fail{% endif %}">
+    <h3>{{ finding.label }}</h3>
+    <p>Expected <span class="status" data-status="{{ finding.expected }}">{{ finding.expected }}</span>
+       Actual <span class="status" data-status="{{ finding.actual|default:'' }}">{{ finding.actual|default:"No report" }}</span></p>
+    {% if finding.evidence %}
+    <details{% if finding.mismatch %} open{% endif %}>
+      <summary>Supporting evidence ({{ finding.evidence|length }})</summary>
+      <ul class="evidence-list">
+      {% for evidence in finding.evidence %}
+        <li>
+          <p class="identifier"><strong>{{ evidence.resource_type }}/{{ evidence.resource_id }}</strong></p>
+          <p class="secondary">{{ evidence.date|date:"Y-m-d" }}{% if evidence.encounter_reference %} · {{ evidence.encounter_reference }}{% endif %}</p>
+          {% if evidence.measurement %}<p class="measurement">{{ evidence.measurement }}</p>{% endif %}
+          {% for excerpt in evidence.excerpts %}<blockquote>{{ excerpt }}</blockquote>{% endfor %}
+        </li>
+      {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+<section class="panel timeline" aria-labelledby="trace-title">
+  <h2 id="trace-title">Execution trace</h2>
+  <ol>
+    {% for event in events %}
+    <li><details>
+      <summary><strong>{{ event.label }}</strong>{% if event.tool %}<span>{{ event.tool }}</span>{% endif %}</summary>
+      {% if event.timestamp %}<p class="secondary">{{ event.timestamp }}</p>{% endif %}
+      {% if event.duration_ms != None %}<p>Duration {{ event.duration_ms }} ms</p>{% endif %}
+      {% if event.parameters %}<p><strong>Request</strong></p>{% endif %}
+      {% for key, value in event.parameters %}<p class="identifier">{{ key }} · {{ value }}</p>{% endfor %}
+      {% if event.count != None %}<p><strong>Response</strong> · {{ event.count }} returned{% if event.more_pages %} · more pages available{% endif %}</p>{% endif %}
+      {% for kind, id in event.references %}<p class="identifier">{{ kind }}/{{ id }}</p>{% endfor %}
+      {% if event.failures != None %}<p>Validation issues · {{ event.failures }}</p>{% endif %}
+      {% if event.readiness %}<p>{{ event.readiness }}</p>{% endif %}
+      {% if event.error %}<p class="notice">{{ event.error }}</p>{% endif %}
+    </details></li>
+    {% empty %}
+    <li class="secondary">The recorded trace is missing or unreadable.</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}

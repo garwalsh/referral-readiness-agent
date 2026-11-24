@@ -1,5 +1,6 @@
 """Administrator views for queueing, following, and inspecting reviews."""
 
+import json
 from uuid import UUID
 
 from django.contrib.auth.decorators import user_passes_test
@@ -36,7 +37,7 @@ EVENT_LABELS = {
 }
 
 
-def timeline(run: ReviewRun) -> list[dict]:
+def timeline(run: ReviewRun, *, include_citation_diagnostics: bool = False) -> list[dict]:
     try:
         raw = read_events(run)
     except (OSError, ValueError):
@@ -53,7 +54,7 @@ def timeline(run: ReviewRun) -> list[dict]:
             status = "Started"
         if kind == "validation_finish" and event.get("failures"):
             status = "Issues found"
-        events.append({
+        display = {
             "timestamp": event.get("timestamp", ""),
             "label": "Tool failed" if kind == "tool" and error else EVENT_LABELS[kind],
             "tool": event.get("tool"),
@@ -64,7 +65,20 @@ def timeline(run: ReviewRun) -> list[dict]:
             "status": status,
             "error": error,
             "readiness": event.get("readiness"),
-        })
+        }
+        citation = event.get("citation") if include_citation_diagnostics and kind == "validation_error" else None
+        if isinstance(citation, dict):
+            # JSON string notation makes line endings, tabs and leading spaces visible in HTML.
+            requirement = event.get("requirement")
+            display["citation"] = {
+                "requirement": REQUIREMENT_LABELS.get(requirement, requirement),
+                "component": citation.get("component"),
+                "resource_type": citation.get("resource_type"),
+                "resource_id": citation.get("resource_id"),
+                "submitted_quote": json.dumps(citation.get("submitted_quote"), ensure_ascii=False),
+                "source_texts": [json.dumps(note, ensure_ascii=False) for note in citation.get("source_texts", [])],
+            }
+        events.append(display)
     return events
 
 
@@ -109,7 +123,8 @@ def run_detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
         for item in (run.report or {}).get("findings", [])
     ]
     return render(request, "dashboard/detail.html", {
-        "active_page": "results", "run": run, "findings": findings, "events": timeline(run),
+        "active_page": "results", "run": run, "findings": findings,
+        "events": timeline(run, include_citation_diagnostics=True),
     })
 
 

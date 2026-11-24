@@ -1,0 +1,65 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Evaluation details · RRR Agent{% endblock %}
+{% block content %}
+<header class="page-heading">
+  <a href="{% url 'evaluations' %}">Evaluations</a>
+  <h1>Evaluation details</h1>
+  <p class="identifier">{{ run.evaluation_run_id }}</p>
+</header>
+<section class="panel report-summary" aria-labelledby="metrics-title">
+  <h2 id="metrics-title">Aggregate metrics</h2>
+  <dl class="run-metadata">
+    {% for label, rate in rates %}{% if rate %}
+    <div><dt>{{ label }}</dt><dd>{% include 'dashboard/evaluations/rate.html' %}</dd></div>
+    {% endif %}{% endfor %}
+    <div><dt>Tool calls</dt><dd>{{ run.metrics.total_tool_calls }}</dd></div>
+    <div><dt>Duration</dt><dd>{{ run.duration_seconds|floatformat:2 }} s</dd></div>
+  </dl>
+  {% if run.metrics.per_requirement %}
+  <details class="evaluation-disclosure">
+    <summary>Accuracy by requirement</summary>
+    <dl class="run-metadata">
+      {% for label, rate in requirement_rates %}<div><dt>{{ label }}</dt><dd>{% include 'dashboard/evaluations/rate.html' %}</dd></div>{% endfor %}
+    </dl>
+  </details>
+  {% endif %}
+</section>
+<section class="evaluation-section" aria-labelledby="case-title">
+  <h2 id="case-title">Evaluated cases</h2>
+  <div class="panel table-wrap">
+    <table>
+      <thead><tr><th scope="col">Case</th><th scope="col">Expected readiness</th><th scope="col">Actual readiness</th><th scope="col">Strict result</th><th scope="col">Tool calls</th><th scope="col">Mismatches and errors</th></tr></thead>
+      <tbody>
+      {% for row in cases %}{% with case=row.case %}
+      <tr{% if not case.strict_pass %} class="evaluation-fail"{% endif %}>
+        <td><a href="{% url 'evaluation_case' run.evaluation_run_id case.fixture_id %}">{{ case.scenario|capfirst }}</a></td>
+        <td>{{ case.expected_readiness.value }}</td><td>{{ case.actual_readiness.value|default:"No report" }}</td>
+        <td>{% include 'dashboard/evaluations/outcome.html' %}</td><td>{{ case.tool_calls }}</td>
+        <td>
+          {% for finding in row.mismatches %}
+          <div>{{ finding.label }} · {{ finding.expected }} → {{ finding.actual|default:"No report" }}</div>
+          {% endfor %}
+          {% include 'dashboard/evaluations/issues.html' %}
+          {% if not case.citations_valid %}<div>Citation validation did not pass.</div>{% endif %}
+        </td>
+      </tr>
+      {% endwith %}{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="panel evaluation-panel" aria-labelledby="prompt-title">
+  <h2 id="prompt-title">Prompt</h2>
+  <dl class="run-metadata">
+    <div><dt>Claude model</dt><dd>{{ run.model }}</dd></div>
+    <div><dt>Dataset</dt><dd>{{ run.dataset }}</dd></div>
+    <div><dt>Review date</dt><dd>{{ run.review_date|date:"Y-m-d" }}</dd></div>
+    <div><dt>Started</dt><dd>{{ run.started_at|date:"Y-m-d H:i:s T" }}</dd></div>
+    <div class="evaluation-wide"><dt>Prompt SHA-256</dt><dd class="identifier">{{ run.prompt_sha256 }}</dd></div>
+  </dl>
+  {% if run.system_instructions %}
+  <h3>Recorded system instructions</h3>
+  <pre class="evaluation-code">{{ run.system_instructions }}</pre>
+  {% else %}<p class="notice">This artifact does not contain the historical system instructions.</p>{% endif %}
+</section>
+{% endblock %}

@@ -94,6 +94,8 @@ RRR_CLAUDE_MODELS = tuple(
     if model.strip()
 )
 
+RRR_EVAL_DIR = Path(os.environ.get("RRR_EVAL_DIR") or BASE_DIR / "evals" / "output")
+
 RRR_RUN_DIR = Path(os.environ.get("RRR_RUN_DIR") or BASE_DIR / "logs" / "dashboard")
 RRR_RUN_TIMEOUT = int(os.environ.get("RRR_RUN_TIMEOUT", "900"))
 if RRR_RUN_TIMEOUT <= 0:

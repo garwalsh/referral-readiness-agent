@@ -1,0 +1,46 @@
+{% extends 'dashboard/base.html' %}
+{% block title %}Evaluation comparison · RRR Agent{% endblock %}
+{% block content %}
+<header class="page-heading"><a href="{% url 'evaluations' %}">Evaluations</a><h1>Evaluation comparison</h1></header>
+{% if error %}
+<p class="notice" role="status">{{ error }}</p>
+{% else %}
+<div class="panel table-wrap">
+  <table aria-label="Evaluation metric comparison">
+    <thead><tr><th scope="col">Metric</th><th scope="col"><a href="{% url 'evaluation_detail' before.evaluation_run_id %}">Before</a></th><th scope="col"><a href="{% url 'evaluation_detail' after.evaluation_run_id %}">After</a></th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Dataset</th><td>{{ before.dataset }}</td><td>{{ after.dataset }}</td></tr>
+      <tr><th scope="row">Model</th><td>{{ before.model }}</td><td>{{ after.model }}</td></tr>
+      <tr><th scope="row">Prompt SHA-256</th><td class="identifier">{{ before.prompt_sha256 }}</td><td class="identifier">{{ after.prompt_sha256 }}</td></tr>
+      {% for label, left, right in metrics %}
+      <tr><th scope="row">{{ label }}</th><td>{% include 'dashboard/evaluations/rate.html' with rate=left %}</td><td>{% include 'dashboard/evaluations/rate.html' with rate=right %}</td></tr>
+      {% endfor %}
+      <tr><th scope="row">Tool calls</th><td>{{ before.metrics.total_tool_calls }}</td><td>{{ after.metrics.total_tool_calls }}</td></tr>
+      <tr><th scope="row">Duration</th><td>{{ before.duration_seconds|floatformat:2 }} s</td><td>{{ after.duration_seconds|floatformat:2 }} s</td></tr>
+    </tbody>
+  </table>
+</div>
+<section class="evaluation-section" aria-labelledby="comparison-cases">
+  <h2 id="comparison-cases">Case changes</h2>
+  <div class="panel table-wrap">
+    <table>
+      <thead><tr><th scope="col">Fixture</th><th scope="col">Before</th><th scope="col">After</th><th scope="col">Change</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <th scope="row">{{ row.before.scenario|capfirst }}<div class="identifier">{{ row.before.fixture_id }}</div></th>
+          <td><a href="{% url 'evaluation_case' before.evaluation_run_id row.before.fixture_id %}">{% include 'dashboard/evaluations/outcome.html' with case=row.before %}</a></td>
+          <td><a href="{% url 'evaluation_case' after.evaluation_run_id row.after.fixture_id %}">{% include 'dashboard/evaluations/outcome.html' with case=row.after %}</a></td>
+          <td><strong>{{ row.outcome }}</strong></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="panel evaluation-panel">
+  <h2>Prompt diff</h2>
+  {% if diff %}<pre class="evaluation-code">{{ diff }}</pre>{% else %}<p>The recorded system instructions are identical.</p>{% endif %}
+</section>
+{% endif %}
+{% endblock %}

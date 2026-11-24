@@ -109,3 +109,14 @@ blockquote { margin: .4rem 0; padding-left: .65rem; border-left: 2px solid var(-
 .timeline li { border-top: 1px solid var(--line); padding: .62rem 0; }
 .timeline summary span { margin-left: .65rem; }
 .timeline details p { margin: .35rem 0 0 1.1rem; overflow-wrap: anywhere; }
+
+.evaluation-section, .evaluation-panel { margin-top: 1.5rem; }
+.evaluation-section > h2, .evaluation-panel > h2 { margin-bottom: .65rem; }
+.evaluation-panel { padding: clamp(1rem, 3vw, 1.55rem); }
+.evaluation-disclosure { margin-top: 1rem; }
+.evaluation-wide { grid-column: 1 / -1; }
+.evaluation-code { overflow-wrap: anywhere; white-space: pre-wrap; padding: 1rem; background: var(--canvas); border: 1px solid var(--line); border-radius: .4rem; }
+.evaluation-fail { background: #fff5f5; box-shadow: inset 3px 0 #aa3640; }
+.status[data-status="PASS"] { background: #def1e8; color: #185843; }
+.status[data-status="FAIL"] { background: #f9e1e4; color: #8b2232; }
+.evaluation-issues { margin: .4rem 0; padding-left: 1.2rem; }

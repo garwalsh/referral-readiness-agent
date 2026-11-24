@@ -22,3 +22,13 @@ The previous hostname is retained in Django's host list for rollback. Caddy serv
 Keep the existing dashboard secret and persistent data mounts when recreating the web service. The worker uses the same SQLite database and trace directory. Browser sessions are scoped to the hostname, so sign in on the canonical dashboard after moving from the previous URL.
 
 Keep OpenEMR's configured FHIR base URL, OAuth issuer, registered clients, and callback URLs on their existing settings. The preferred browser hostname is an additional Caddy route. LangCare continues to use the existing integration origin.
+
+## Evaluation artifacts
+
+Transfer each completed synthetic evaluation directory from `evals/output/` to the host's `${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/evaluations/`. Preserve the directory name and all relative files, including the JSON, summary, traces, and reports. Verify the copy before moving it into the evaluation root. Give the dashboard container user (UID 10001) read access to the files and traversal access to the directories. The web service mounts this directory read-only. It stays separate from SQLite, worker traces, and the Docker build context.
+
+Rebuild and recreate only the web service for an evaluation UI release. The existing worker can continue processing on its current image.
+
+```sh
+docker compose -p rrr-dashboard -f deploy/compose.yaml up -d --build --no-deps dashboard
+```

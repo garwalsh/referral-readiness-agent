@@ -75,6 +75,18 @@
         {% if event.readiness %}<p>{{ event.readiness }}</p>{% endif %}
         {% for key, value in event.parameters.items %}<p class="identifier">{{ key }} · {{ value }}</p>{% endfor %}
         {% if event.error %}<p class="notice">{{ event.error }}</p>{% endif %}
+        {% if event.citation %}
+        <p>{{ event.citation.requirement }} · {{ event.citation.component }}</p>
+        <p class="identifier">{{ event.citation.resource_type }}/{{ event.citation.resource_id }}</p>
+        <p><strong>Submitted excerpt</strong></p>
+        <pre class="evaluation-code">{{ event.citation.submitted_quote }}</pre>
+        {% for note in event.citation.source_texts %}
+          <p><strong>Compared attachment {{ forloop.counter }}</strong></p>
+          <pre class="evaluation-code">{{ note }}</pre>
+        {% empty %}
+          <p>No narrative text was compared.</p>
+        {% endfor %}
+        {% endif %}
       </details>
     </li>
   {% empty %}

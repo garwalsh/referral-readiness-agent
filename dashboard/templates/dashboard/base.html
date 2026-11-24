@@ -16,6 +16,7 @@
       <a href="{% url 'run_agent' %}"{% if active_page == 'run_agent' %} aria-current="page"{% endif %}>Run agent</a>
       <a href="{% url 'results' %}"{% if active_page == 'results' %} aria-current="page"{% endif %}>Run results</a>
       <a href="{% url 'history' %}"{% if active_page == 'history' %} aria-current="page"{% endif %}>Run history</a>
+      <a href="{% url 'evaluations' %}"{% if active_page == 'evaluations' %} aria-current="page"{% endif %}>Evaluations</a>
     </nav>
     <form class="account" method="post" action="{% url 'logout' %}">
       {% csrf_token %}

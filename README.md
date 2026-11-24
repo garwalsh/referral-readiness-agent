@@ -19,7 +19,7 @@ python3 scripts/run_agent.py a34c2416-8263-4819-9acf-690e2e6fdd01 \
 
 The prompt asks Claude to treat clinical narratives as untrusted evidence, interpret the checklist, and propose supporting IDs and note excerpts. Python enforces patient scope, the read-only tool allowlist, and the ten-attempt cap. It validates all five findings, verifies each citation and excerpt against that run's retrieved chart, checks measured blood pressure and heart rate, and applies the inclusive 90-day ECG rule. Claude interprets which components the excerpts support. Python renders the explanations from checklist fields and calculates readiness.
 
-A completed, unfiltered search can establish a documentation gap even if it returns zero results. Incomplete retrieval leaves unsupported findings unknown. The JSONL trace under `logs/` records run metadata, tool parameters and durations, retrieved IDs, validation failures, and final statuses. Full clinical narratives stay out of the trace.
+A completed, unfiltered search can establish a documentation gap even if it returns zero results. Incomplete retrieval leaves unsupported findings unknown. The JSONL trace under `logs/` records run metadata, tool parameters and durations, retrieved IDs, validation failures, and final statuses. Ordinary tool events omit clinical narratives. A rejected citation records its submitted excerpt, FHIR resource, requirement, and reason. If a text comparison failed, the event also retains the original compared attachments from that cited, patient-scoped resource.
 
 ## Operations dashboard
 
@@ -48,7 +48,7 @@ Keep the same secret across restarts when you want existing sessions to stay val
 
 A web request validates the synthetic patient, model, and date, then queues a run in SQLite. A separate worker claims it with a conditional update and invokes the existing agent CLI with the selected model. The browser polls the real agent trace every two seconds. One worker is suitable for this demo. An interrupted run becomes a visible failure after its time limit so it can be retried explicitly.
 
-SQLite stores the application audit record and the validated report. The separate technical trace stores stages, timed tool activity, and errors. Evidence cards display short verified excerpts and measurements. Full clinical narratives stay out of the trace.
+SQLite stores the application audit record and the validated report. The separate technical trace stores stages, timed tool activity, and errors. Evidence cards display short verified excerpts and measurements. Administrators can inspect failed comparisons in the run detail timeline. The progress endpoint returns only the validation summary.
 
 ### Deployment
 
@@ -126,8 +126,10 @@ A strict pass requires an exact match on all five checklist items and overall re
 
 Each execution creates a new private run directory under the Git-ignored `evals/output/`, with `summary.md`, `results.json` and per-case traces and reports where available. The JSON captures the exact system instructions, prompt and source hashes, Git HEAD, working-tree status for the agent source files and dataset identifiers. The system prompt hash identifies the instructions sent to Claude. Source hashes also capture the code-side policy and output schema. The evaluator runs independently of Django.
 
-### Future evaluation dashboard
+### Inspect evaluations in the dashboard
 
-The Operations Dashboard should list evaluation runs and aggregate metrics, compare runs across models and prompt versions, and let operators inspect failed cases and open their associated agent traces. A prompt inspection view should show the exact system instructions and their version for the selected agent run. Present stable system instructions, referral policy and run-specific inputs separately while preserving a view of the original instructions as sent. Keep credentials and private deployment configuration out of the interface.
+Sign in and open **Evaluations** to browse completed runs, inspect checklist mismatches and recorded evidence, and see the original system instructions and prompt hash. Select two completed evaluations of the same dataset to compare metrics and fixture outcomes and view the line-based prompt diff.
+
+The dashboard reads local `evals/output/` by default. Override the root with `RRR_EVAL_DIR`. It reads the evaluator's existing artifact layout without importing results into SQLite. See the [deployment notes](deploy/README.md) for transferring evaluation artifacts.
 
 See [AGENTS.md](AGENTS.md) for project boundaries and verified FHIR behavior.

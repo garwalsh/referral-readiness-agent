@@ -14,6 +14,12 @@ services:
       dockerfile: deploy/Dockerfile
     env_file:
       - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/dashboard.env
+    environment:
+      RRR_EVAL_DIR: /var/lib/rrr-evaluations
+    volumes:
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/data:/var/lib/rrr
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/fixture-ids.json:/etc/rrr/fixture-ids.json:ro
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/evaluations:/var/lib/rrr-evaluations:ro
     command: gunicorn dashboard.wsgi --bind 0.0.0.0:8000 --workers 2 --access-logfile -
     networks:
       proxy:

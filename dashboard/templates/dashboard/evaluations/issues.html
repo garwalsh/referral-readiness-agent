@@ -1,0 +1,7 @@
+{% if case.execution_errors or case.validation_errors or case.guardrail_violations %}
+<ul class="evaluation-issues">
+  {% for error in case.execution_errors %}<li>Execution · {{ error }}</li>{% endfor %}
+  {% for error in case.validation_errors %}<li>Validation · {{ error }}</li>{% endfor %}
+  {% for error in case.guardrail_violations %}<li>Guardrail · {{ error }}</li>{% endfor %}
+</ul>
+{% endif %}

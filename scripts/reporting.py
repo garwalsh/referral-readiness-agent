@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -162,6 +162,15 @@ def has_measurement(resource: dict[str, Any]) -> bool:
     return isinstance(quantity, dict) and type(quantity.get("value")) in (int, float)
 
 
+class CitationValidationError(ValueError):
+    """Keep the rejected citation and any compared attachments with its reason."""
+
+    def __init__(self, reason: str, item: DraftEvidence, source_texts: tuple[str, ...] = ()) -> None:
+        super().__init__(reason)
+        self.item = item
+        self.source_texts = source_texts
+
+
 # Output guardrails
 def verify_support(
     item: DraftEvidence, resources: dict[tuple[str, str], dict[str, Any]], review_date: date
@@ -198,8 +207,11 @@ def verify_support(
         if item.resource_type != "DiagnosticReport" or not item.quote or not item.quote.strip():
             raise ValueError("Narrative support requires an exact excerpt from a clinical report.")
         excerpt = " ".join(item.quote.split())
-        if not any(excerpt in " ".join(note.split()) for note in resource.get("notes", [])):
-            raise ValueError("A cited excerpt does not occur in the retrieved report.")
+        notes = resource.get("notes", [])
+        if not any(excerpt in " ".join(note.split()) for note in notes):
+            raise CitationValidationError(
+                "A cited excerpt does not occur in the retrieved report.", item, tuple(notes)
+            )
 
     # Persist only a short, verified excerpt or measurement for the report display.
     encounter = resource.get("encounter") or {}
@@ -220,9 +232,17 @@ def validate_finding(
     required = CHECKLIST[draft.requirement_id]
     support: dict[Component, list[EvidenceReference]] = {}
     for item in draft.evidence:
-        if item.component not in required:
-            raise ValueError("Citation supports a component outside this checklist requirement.")
-        support.setdefault(item.component, []).append(verify_support(item, resources, review_date))
+        try:
+            if item.component not in required:
+                raise ValueError("Citation supports a component outside this checklist requirement.")
+            reference = verify_support(item, resources, review_date)
+        except CitationValidationError:
+            raise
+        except ValueError as error:
+            raise CitationValidationError(str(error), item) from error
+        except (TypeError, AttributeError, KeyError) as error:
+            raise CitationValidationError("Cited resource had malformed evidence fields.", item) from error
+        support.setdefault(item.component, []).append(reference)
 
     # Missing documentation requires a completed search. Positive evidence can resolve
     # a gap even when a different search failed or was incomplete.
@@ -277,15 +297,28 @@ def build_report(
     complete_searches: set[str],
     retrieval_errors: list[RetrievalError],
     run_failure: Optional[str] = None,
+    *,
+    on_validation_error: Optional[
+        Callable[[str, Optional[Requirement], Optional[CitationValidationError]], None]
+    ] = None,
 ) -> tuple[Report, list[str]]:
     validation_errors = []
+
+    def record_error(
+        message: str, requirement: Optional[Requirement] = None,
+        citation: Optional[CitationValidationError] = None,
+    ) -> None:
+        validation_errors.append(message)
+        if on_validation_error is not None:
+            on_validation_error(message, requirement, citation)
+
     drafts = {}
     if draft_json is not None:
         try:
             drafts = {item.requirement_id: item for item in DraftReport.model_validate_json(draft_json).findings}
         except ValidationError as error:
             error_types = ", ".join(sorted({item["type"] for item in error.errors()}))
-            validation_errors.append(f"Invalid Claude checklist draft ({error_types}).")
+            record_error(f"Invalid Claude checklist draft ({error_types}).")
 
     findings = []
     for requirement in CHECKLIST:
@@ -294,10 +327,11 @@ def build_report(
                 findings.append(validate_finding(drafts[requirement], resources, complete_searches, review_date))
                 continue
             except ValueError as error:
-                validation_errors.append(f"{requirement.value}: {error}")
+                citation = error if isinstance(error, CitationValidationError) else None
+                record_error(f"{requirement.value}: {error}", requirement, citation)
                 explanation = "Proposed evidence did not pass validation."
             except (TypeError, AttributeError, KeyError):
-                validation_errors.append(f"{requirement.value}: Cited resource had malformed evidence fields.")
+                record_error(f"{requirement.value}: Cited resource had malformed evidence fields.", requirement)
                 explanation = "Proposed evidence did not pass validation."
         else:
             explanation = "No valid checklist assessment was available."

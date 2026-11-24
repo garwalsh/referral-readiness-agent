@@ -164,6 +164,36 @@ class ReviewWorkerTest(TestCase):
         self.assertEqual([event["label"] for event in progress["events"]],
                          ["Agent started", "Tool completed", "Report validation finished", "Readiness calculated"])
 
+    def test_citation_diagnostics_are_private_to_the_admin_run_detail(self) -> None:
+        run = self.queue()
+        source = '  <script>synthetic attachment</script>\r\né'
+        trace_path(run).write_text(json.dumps({
+            "event": "validation_error", "requirement": "ecg", "message": "ecg: quote mismatch",
+            "citation": {"component": "ecg", "resource_type": "DiagnosticReport", "resource_id": "ecg-id",
+                         "submitted_quote": "Wrong excerpt", "source_texts": [source], "reason": "quote mismatch"},
+        }) + "\n")
+        detail_url = reverse("run_detail", args=[run.pk])
+        progress_url = reverse("run_progress", args=[run.pk])
+        self.assertEqual(self.client.get(detail_url).status_code, 302)
+        self.assertEqual(self.client.get(progress_url).status_code, 302)
+        viewer = get_user_model().objects.create_user("worker-viewer")
+        self.client.force_login(viewer)
+        self.assertEqual(self.client.get(detail_url).status_code, 302)
+        self.assertEqual(self.client.get(progress_url).status_code, 302)
+
+        self.client.force_login(self.admin)
+        detail = self.client.get(detail_url)
+        self.assertContains(detail, "ECG documentation")
+        self.assertContains(detail, "DiagnosticReport/ecg-id")
+        self.assertContains(detail, "Wrong excerpt")
+        self.assertContains(detail, '&lt;script&gt;synthetic attachment&lt;/script&gt;\\r\\né')
+        self.assertNotContains(detail, "<script>synthetic attachment</script>")
+        self.assertIn("no-store", detail["Cache-Control"])
+        progress = self.client.get(progress_url)
+        self.assertContains(progress, "quote mismatch")
+        self.assertNotContains(progress, "synthetic attachment")
+        self.assertNotContains(progress, "Wrong excerpt")
+
     def test_partial_line_is_hidden_and_failed_process_is_audited(self) -> None:
         run = self.queue()
         claimed = claim_next()

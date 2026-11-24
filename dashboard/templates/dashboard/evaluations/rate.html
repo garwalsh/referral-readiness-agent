@@ -1,0 +1,1 @@
+{% if rate %}{{ rate.count }}/{{ rate.total }}{% if rate.percentage != None %} ({{ rate.percentage|floatformat:2 }}%){% endif %}{% else %}—{% endif %}

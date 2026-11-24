@@ -20,7 +20,9 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, build_opener
 from uuid import UUID, uuid4
 
-from reporting import CHECKLIST, DraftReport, RetrievalError, build_report
+from reporting import (
+    CHECKLIST, CitationValidationError, DraftReport, Requirement, RetrievalError, build_report,
+)
 from verify_langcare import NoRedirect, rpc, tool_result
 
 Json = dict[str, Any]
@@ -95,7 +97,10 @@ SYSTEM = (
     "for each narrative component. Set quote to null for measured Observation values. "
     "Assess medication history only from notes. Explicitly documented no current medications counts; "
     "missing medication history does not. Do not infer negative history from silence. "
-    "The referral reason is documented palpitations. No diagnoses, recommendations, or referral decisions."
+    "For referral_reason, evidence must explicitly establish that the proposed cardiology referral is for palpitations. "
+    "Documentation that the patient experiences palpitations is insufficient on its own. "
+    "If referral intent is not documented, mark referral_reason MISSING. "
+    "No diagnoses, recommendations, or referral decisions."
 )
 DRAFT_SCHEMA = DraftReport.model_json_schema()
 
@@ -233,6 +238,33 @@ def write_event(trace: TextIO, event: Json) -> None:
     event = {"timestamp": datetime.now(timezone.utc).isoformat(), **event}
     trace.write(json.dumps(event, ensure_ascii=False) + "\n")
     trace.flush()
+
+
+def write_validation_error(
+    trace: TextIO, message: str, requirement: Requirement | None,
+    citation: CitationValidationError | None, credentials: tuple[str, ...],
+) -> None:
+    event: Json = {"event": "validation_error", "message": message}
+    if requirement is not None:
+        event["requirement"] = requirement.value
+    if citation is not None:
+        # Preserve exact text unless an active runtime credential appears literally in it.
+        def redact(value: str) -> str:
+            for credential in credentials:
+                if credential:
+                    value = value.replace(credential, "[REDACTED]")
+            return value
+
+        item = citation.item
+        event["citation"] = {
+            "component": item.component.value,
+            "resource_type": item.resource_type,
+            "resource_id": redact(item.resource_id),
+            "submitted_quote": redact(item.quote) if item.quote is not None else None,
+            "source_texts": [redact(note) for note in citation.source_texts],
+            "reason": str(citation),
+        }
+    write_event(trace, event)
 
 
 # Execution guardrails
@@ -395,9 +427,10 @@ def main() -> None:
             draft, patient_id, args.review_date,
             tools.retrieved if tools else {}, tools.complete_searches if tools else set(),
             tools.retrieval_errors if tools else errors, failure,
+            on_validation_error=lambda message, requirement, citation: write_validation_error(
+                trace, message, requirement, citation, (config["ANTHROPIC_API_KEY"], config["LANGCARE_MCP_TOKEN"])
+            ),
         )
-        for message in validation_errors:
-            write_event(trace, {"event": "validation_error", "message": message})
         write_event(trace, {"event": "validation_finish", "failures": len(validation_errors)})
         write_event(trace, {"event": "finish", "run_id": run_id,
                             "statuses": {item.requirement_id.value: item.status.value for item in report.findings},
