@@ -1,0 +1,115 @@
+{
+  "dataset": "rrr-v1",
+  "seed": 20261125,
+  "review_date": "2026-11-25",
+  "cases": [
+    {
+      "patient_id": "4f07e0b9-b4e9-5226-957d-509c53f04eb8",
+      "scenario": "complete",
+      "status": "READY",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "present",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "4427c4f0-9689-5afb-a839-ccca81c7cac0",
+      "scenario": "missing medication history",
+      "status": "NEEDS_REVIEW",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "present",
+        "relevant_history": "missing"
+      }
+    },
+    {
+      "patient_id": "cb32fbee-27ed-5b01-9cd6-a4521e99d6bc",
+      "scenario": "outdated ECG",
+      "status": "NEEDS_REVIEW",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "outdated",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "da7bd1b3-bcf4-5922-b2f3-1a21dc468b14",
+      "scenario": "distributed evidence",
+      "status": "READY",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "present",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "1826057a-fc2e-5fa6-9d65-7471adff98fe",
+      "scenario": "missing referral reason",
+      "status": "NEEDS_REVIEW",
+      "checklist": {
+        "referral_reason": "missing",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "present",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "d7923a73-6a06-56b5-9c55-c4eeb0c19d5b",
+      "scenario": "missing symptom history",
+      "status": "NEEDS_REVIEW",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "missing",
+        "physical_assessment": "present",
+        "ecg": "present",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "f2afe6fc-9584-5774-bced-c2bcd831716f",
+      "scenario": "missing physical assessment",
+      "status": "NEEDS_REVIEW",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "missing",
+        "ecg": "present",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "e25ba40c-cfd7-5cb5-927d-718d66510b30",
+      "scenario": "missing ECG",
+      "status": "NEEDS_REVIEW",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "missing",
+        "relevant_history": "present"
+      }
+    },
+    {
+      "patient_id": "dd3e5af5-f1be-5f0a-ae5b-71250bce7c5b",
+      "scenario": "ECG at the 90-day boundary",
+      "status": "READY",
+      "checklist": {
+        "referral_reason": "present",
+        "symptom_history": "present",
+        "physical_assessment": "present",
+        "ecg": "present",
+        "relevant_history": "present"
+      }
+    }
+  ]
+}
