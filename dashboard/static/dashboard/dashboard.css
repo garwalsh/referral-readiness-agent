@@ -120,3 +120,20 @@ blockquote { margin: .4rem 0; padding-left: .65rem; border-left: 2px solid var(-
 .status[data-status="PASS"] { background: #def1e8; color: #185843; }
 .status[data-status="FAIL"] { background: #f9e1e4; color: #8b2232; }
 .evaluation-issues { margin: .4rem 0; padding-left: 1.2rem; }
+
+.prompt-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .9rem; margin: 1rem 0; }
+.prompt-modes { display: inline-flex; gap: .2rem; border: 1px solid var(--line); padding: .2rem; border-radius: .5rem; }
+.prompt-modes a { padding: .35rem .75rem; font-weight: 650; text-decoration: none; border-radius: .3rem; }
+.prompt-modes a[aria-current="true"] { background: var(--accent); color: #fff; }
+.prompt-prose { max-width: 70ch; line-height: 1.7; overflow-wrap: anywhere; }
+.prompt-prose > * + * { margin-top: 1rem; }
+.prompt-prose li + li { margin-top: .3rem; }
+.prompt-prose code { font: .92em ui-monospace, Menlo, monospace; background: var(--canvas); }
+.prompt-prose pre { padding: .8rem; background: var(--canvas); overflow: auto; }
+.prompt-prose a, .prompt-controls > a { color: var(--accent); text-underline-offset: .2em; }
+.prompt-raw, .prompt-diff { tab-size: 4; line-height: 1.65; }
+.prompt-diff-line.header { color: var(--muted); }
+.prompt-diff-line.removed { background: #f9e1e4; color: #70202b; }
+.prompt-diff-line.added { background: #def1e8; color: #185843; }
+.prompt-diff-line mark { color: inherit; background: #f1bcc3; font-weight: 700; }
+.prompt-diff-line.added mark { background: #aee2c9; }

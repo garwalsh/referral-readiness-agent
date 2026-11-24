@@ -40,7 +40,9 @@
 </section>
 <section class="panel evaluation-panel">
   <h2>Prompt diff</h2>
-  {% if diff %}<pre class="evaluation-code">{{ diff }}</pre>{% else %}<p>The recorded system instructions are identical.</p>{% endif %}
+  {% if diff_lines %}
+  <pre class="evaluation-code prompt-diff" id="prompt-diff" tabindex="0"><code>{% for line in diff_lines %}<span class="prompt-diff-line {{ line.kind }}">{% for segment, changed in line.segments %}{% if changed and segment %}<mark>{{ segment }}</mark>{% else %}{{ segment }}{% endif %}{% endfor %}</span>{% if not forloop.last %}{{ newline }}{% endif %}{% endfor %}</code></pre>
+  {% else %}<p>The recorded system instructions are identical.</p>{% endif %}
 </section>
 {% endif %}
 {% endblock %}

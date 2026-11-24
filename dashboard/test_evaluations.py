@@ -1,7 +1,9 @@
 """Evaluation page tests using temporary artifacts and no model calls."""
 from datetime import datetime, timezone
 from hashlib import sha256
+from html import unescape
 import json
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -9,6 +11,7 @@ from uuid import uuid4
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils.html import strip_tags
 
 from .evaluations import REQUIREMENTS, discover
 
@@ -97,9 +100,58 @@ class EvaluationPageTests(TestCase):
         self.assertContains(history, "1/2 (50.00%)")
         self.assertContains(history, "2.12 s")
         detail = self.client.get(reverse("evaluation_detail", args=[result["evaluation_run_id"]]))
-        self.assertContains(detail, "Original instructions.\n&lt;literal markup&gt;")
+        self.assertContains(detail, "Original instructions.<br />")
+        self.assertContains(detail, "&lt;literal markup&gt;")
         self.assertContains(detail, result["prompt_sha256"])
         self.assertContains(detail, "Referral reason · MISSING → PRESENT")
+
+    def test_prompt_modes_and_exact_download_preserve_whitespace_and_hash(self):
+        prompt = "\r\n  Leading spaces & <text>\r\nSecond line\t \n\n"
+        directory, result = self.write_run(prompt)
+        original = (directory / "results.json").read_bytes()
+        url = reverse("evaluation_detail", args=[result["evaluation_run_id"]])
+        formatted = self.client.get(url)
+        self.assertContains(formatted, 'aria-current="true">Formatted</a>')
+        self.assertContains(formatted, "Leading spaces &amp; &lt;text&gt;<br />")
+        self.assertContains(formatted, 'href="?prompt=raw#prompt-title"')
+        raw = self.client.get(url, {"prompt": "raw"})
+        self.assertContains(raw, 'aria-current="true">Raw</a>')
+        self.assertContains(raw, 'href="?prompt=download"')
+        match = re.search(r'<pre [^>]*id="raw-prompt"[^>]*><code>(.*?)</code></pre>', raw.content.decode(), re.S)
+        self.assertEqual(unescape(match[1]), prompt)
+        self.assertContains(raw, result["prompt_sha256"])
+        download = self.client.get(url, {"prompt": "download"})
+        self.assertEqual(download.content, prompt.encode())
+        self.assertEqual(sha256(download.content).hexdigest(), result["prompt_sha256"])
+        self.assertIn("attachment;", download["Content-Disposition"])
+        self.assertEqual((directory / "results.json").read_bytes(), original)
+        self.client.logout()
+        for mode in ("raw", "download"):
+            self.assertEqual(self.client.get(url, {"prompt": mode}).status_code, 302)
+
+    def test_formatted_mode_renders_markdown_without_active_html_or_images(self):
+        prompt = ("## Rules\n\n- **Exact** with `code`\n- Another item\n\n"
+                  "First line\nSecond line\n\n<script>alert(1)</script>\n\n"
+                  "[unsafe](javascript:alert%281%29) ![picture](https://example.test/image.png)")
+        _, result = self.write_run(prompt)
+        response = self.client.get(reverse("evaluation_detail", args=[result["evaluation_run_id"]]))
+        self.assertContains(response, "<h2>Rules</h2>")
+        self.assertContains(response, "<li><strong>Exact</strong> with <code>code</code></li>")
+        self.assertContains(response, "First line<br />\nSecond line")
+        self.assertContains(response, "&lt;script&gt;alert(1)&lt;/script&gt;")
+        self.assertNotContains(response, "<script>alert(1)</script>")
+        self.assertNotContains(response, 'href="javascript:')
+        self.assertNotContains(response, "<img")
+        self.assertContains(response, result["prompt_sha256"])
+
+    def test_long_plain_prompt_gets_paragraph_spacing_without_rewording(self):
+        prompt = " ".join(f"Sentence {number} contains original instructions." for number in range(10))
+        _, result = self.write_run(prompt)
+        response = self.client.get(reverse("evaluation_detail", args=[result["evaluation_run_id"]]))
+        match = re.search(r'<div class="prompt-prose" id="formatted-prompt">(.*?)</div>',
+                          response.content.decode(), re.S)
+        self.assertGreater(match[1].count("<p>"), 1)
+        self.assertEqual(" ".join(strip_tags(match[1]).split()), prompt)
 
     def test_case_drilldown_shows_statuses_citation_and_trace(self):
         _, result = self.write_run()
@@ -124,8 +176,11 @@ class EvaluationPageTests(TestCase):
         self.assertContains(response, "Regressed")
         self.assertEqual(response.context["rows"][0]["after"].scenario, "missing referral reason")
         self.assertEqual(response.context["rows"][0]["outcome"], "Improved")
-        self.assertContains(response, "-Old instructions")
-        self.assertContains(response, "+New instructions")
+        self.assertContains(response, '<mark>Old</mark>')
+        self.assertContains(response, '<mark>New</mark>')
+        rendered = re.search(r'<pre [^>]*id="prompt-diff"[^>]*>(.*?)</pre>', response.content.decode(), re.S)[1]
+        self.assertEqual(unescape(strip_tags(rendered)), "--- Before\n+++ After\n@@ -1,2 +1,2 @@\n Common\n"
+                         "-Old instructions\n+New instructions")
         after["system_instructions"] = None
         self.write_result(folder, after)
         self.assertContains(self.client.get(url, selection), "need recorded system instructions")

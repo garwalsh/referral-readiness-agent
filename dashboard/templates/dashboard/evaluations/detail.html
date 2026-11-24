@@ -59,7 +59,18 @@
   </dl>
   {% if run.system_instructions %}
   <h3>Recorded system instructions</h3>
-  <pre class="evaluation-code">{{ run.system_instructions }}</pre>
+  <div class="prompt-controls">
+    <div class="prompt-modes" role="group" aria-label="Prompt display mode">
+      <a href="{% url 'evaluation_detail' run.evaluation_run_id %}#prompt-title"{% if not raw_prompt %} aria-current="true"{% endif %}>Formatted</a>
+      <a href="?prompt=raw#prompt-title"{% if raw_prompt %} aria-current="true"{% endif %}>Raw</a>
+    </div>
+    {% if raw_prompt %}<a href="?prompt=download">Download exact text</a>{% endif %}
+  </div>
+  {% if raw_prompt %}
+    <pre class="evaluation-code prompt-raw" id="raw-prompt" tabindex="0"><code>{{ rendered_prompt }}</code></pre>
+  {% else %}
+    <div class="prompt-prose" id="formatted-prompt">{{ rendered_prompt }}</div>
+  {% endif %}
   {% else %}<p class="notice">This artifact does not contain the historical system instructions.</p>{% endif %}
 </section>
 {% endblock %}

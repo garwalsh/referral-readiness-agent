@@ -9,6 +9,7 @@ from django.views.decorators.http import require_safe
 from .evaluations import (
     METRIC_LABELS, Evaluation, EvaluationCase, SavedEvaluation, compare, discover, load_report, load_trace,
 )
+from .prompt_display import display_diff, formatted_prompt, literal_prompt
 from .views import EVENT_LABELS, REQUIREMENT_LABELS, administrator_required
 
 
@@ -77,10 +78,18 @@ def history(request: HttpRequest) -> HttpResponse:
 @require_safe
 def detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
     run = find_run(run_id).result
+    mode = request.GET.get("prompt")
+    instructions = run.system_instructions
+    if mode == "download" and instructions is not None:
+        return HttpResponse(instructions.encode("utf-8"), content_type="text/plain; charset=utf-8",
+                            headers={"Content-Disposition": f'attachment; filename="rrr-prompt-{run_id}.txt"'})
+    raw = mode == "raw"
+    prompt = (literal_prompt(instructions) if raw else formatted_prompt(instructions)) if instructions else None
     cases = [{"case": case, "mismatches": [row for row in checklist(case) if row["mismatch"]]}
              for case in run.cases]
     requirement_rates = [(label, run.metrics.per_requirement.get(key)) for key, label in REQUIREMENT_LABELS.items()]
-    return show(request, "detail", run=run, cases=cases, rates=rates(run), requirement_rates=requirement_rates)
+    return show(request, "detail", run=run, cases=cases, rates=rates(run),
+                requirement_rates=requirement_rates, raw_prompt=raw, rendered_prompt=prompt)
 
 
 @administrator_required
@@ -123,6 +132,5 @@ def comparison(request: HttpRequest) -> HttpResponse:
         return show(request, "comparison", error=str(error))
     keys = tuple(METRIC_LABELS)[:4]
     metrics = [(METRIC_LABELS[key], getattr(before.metrics, key), getattr(after.metrics, key)) for key in keys]
-    # Keep diff line endings uniform for rendering inside a preformatted block.
     return show(request, "comparison", before=before, after=after, rows=rows, metrics=metrics,
-                diff="\n".join(line.rstrip("\n") for line in diff))
+                diff_lines=display_diff(diff), newline="\n")
