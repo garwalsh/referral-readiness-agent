@@ -52,3 +52,19 @@ dumps/
 
 # Local evaluation reports and traces
 /evals/output/
+
+# Deployment runtime files and copied OAuth grants
+dashboard.env
+runner.env
+stackone-oauth.json
+stackone-oauth.lock
+/fixture-ids.json
+/stackone-auth/
+/data/
+/evaluations/
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite-journal
+*.sqlite3-journal

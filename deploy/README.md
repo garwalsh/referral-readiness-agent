@@ -1,46 +1,68 @@
-# RRR deployment addresses
+# Run the dashboard and worker
 
-| Service | Public address |
-| --- | --- |
-| RRR Operations Dashboard | [referralsagent.garwalsh.com](https://referralsagent.garwalsh.com/) |
-| OpenEMR browser access | [emr.garwalsh.com](https://emr.garwalsh.com/) |
-| Preserved OpenEMR integration origin | [rrr.garwalsh.com](https://rrr.garwalsh.com/) |
-| LangCare MCP | `https://mcp.rrr.garwalsh.com/mcp` |
+## Run the dashboard locally
 
-Both new hostnames have A records pointing to `64.225.121.106`. The existing Caddy service terminates HTTPS. It proxies the dashboard to `rrr-dashboard:8000` and both OpenEMR hostnames to `openemr:80` over the existing Docker network. The previous dashboard hostname redirects to the canonical URL and preserves the request URI.
-
-The dashboard service reads these public-origin settings from its private runtime environment:
-
-```dotenv
-DJANGO_ALLOWED_HOSTS=referralsagent.garwalsh.com,rrr-dashboard.64.225.121.106.sslip.io
-DJANGO_CSRF_TRUSTED_ORIGINS=https://referralsagent.garwalsh.com
-DJANGO_TRUST_PROXY=1
-```
-
-The previous hostname is retained in Django's host list for rollback. Caddy serves its redirect.
-
-Keep the existing dashboard secret and persistent data mounts when recreating the web service. The worker uses the same SQLite database and trace directory. Browser sessions are scoped to the hostname, so sign in on the canonical dashboard after moving from the previous URL.
-
-Keep OpenEMR's configured FHIR base URL, OAuth issuer, registered clients, and callback URLs on their existing settings. The preferred browser hostname is an additional Caddy route. LangCare continues to use the existing integration origin.
-
-## Evaluation artifacts
-
-Transfer each completed synthetic evaluation directory from `evals/output/` to the host's `${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/evaluations/`. Preserve the directory name and all relative files, including the JSON, summary, traces, and reports. Verify the copy before moving it into the evaluation root. Give the dashboard container user (UID 10001) read access to the files and traversal access to the directories. The web service mounts this directory read-only. It stays separate from SQLite, worker traces, and the Docker build context.
-
-Rebuild and recreate only the web service for an evaluation UI release. The existing worker can continue processing on its current image.
+Create the Python 3.12 virtual environment from the [README](../README.md). Configure a synthetic fixture map using the [fixture guide](../docs/fixtures.md#map-loaded-fixtures). The web process reads the map to populate the patient selector. The worker also needs the connection settings for the selected transport.
 
 ```sh
-docker compose -p rrr-dashboard -f deploy/compose.yaml up -d --build --no-deps dashboard
+python -m pip install -r dashboard/requirements.txt
+export DJANGO_DEBUG=1
+export DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver 127.0.0.1:8000
 ```
 
-## Worker integration transport
+Run `python manage.py run_review_worker` in a second shell with the same Django settings and SQLite path. The default database is `db.sqlite3` in the project root. Keep the same private Django secret across restarts to preserve signed sessions. Use debug mode only for local development.
 
-The deployed worker uses `RRR_TRANSPORT=stackone` and the existing LangCare linked account ID in `runner.env`. Its OAuth grant is stored in the worker-only bind mount at `stackone-auth/stackone-oauth.json` under the deployment directory. The directory and file must be owned by UID 10001 with modes 0700 and 0600 respectively. The web service has no access to this mount. Keep the original LangCare credentials in `runner.env` for explicit rollback.
+## StackOne Gateway
 
-Authorize the worker grant interactively with `python3 scripts/stackone.py login` on a trusted machine. Transfer its owner-only JSON directly into the worker mount over SSH, outside the source tree. Provision a different grant for subsequent local testing. Refresh can rotate the token, so two independent token files must not keep using the same grant. The worker locks the credential directory during refresh and atomically saves the token response. A revoked or expired grant fails visibly without retrying via LangCare.
+Set `STACKONE_ACCOUNT_ID` to your linked LangCare account ID. The [adapter](../scripts/stackone.py) currently uses the demo connector's two action IDs. A different connector registration may require changing those constants to match the IDs in that Gateway.
 
-To return to direct LangCare, set `RRR_TRANSPORT=langcare` in the private `runner.env`. When the queue is idle, recreate only the worker using the existing Compose project. The reviewed case history, traces and evaluation archives stay in their existing mounts.
+```sh
+python scripts/stackone.py login
+python scripts/stackone.py probe "$PATIENT_ID"
+RRR_TRANSPORT=stackone python scripts/run_agent.py "$PATIENT_ID" --review-date 2026-11-25
+```
+
+In the consent screen, select the linked LangCare account and only FHIR Search and Read. Leave **Load tools when needed** enabled. The callback listens on loopback during sign-in. The CLI defaults to storing the member grant at `~/.config/rrr/stackone-oauth.json`. Use `STACKONE_OAUTH_FILE` to specify a private alternate path. The probe performs one patient-scoped search and prints the count and Gateway action metadata when available.
+
+The worker refreshes the grant without a browser. A file lock serializes refreshes and the token store is replaced atomically. Use separate grants for the worker and local testing because refresh can rotate the token. Revoked grants fail visibly and require reauthorization. The adapter never switches to direct LangCare automatically.
+
+## Docker Compose
+
+The [Compose file](compose.yaml) runs Gunicorn with WhiteNoise and a separate worker from the same image. It expects the external Docker network `rrr_default` with a TLS reverse proxy on that network forwarding to `rrr-dashboard:8000`. Keep the application private to the proxy network. Keep debug mode off and only trust forwarded headers when the proxy controls them.
+
+Keep the data and runtime files under `RRR_DEPLOY_DIR` outside the source checkout. Its default is `/opt/rrr-dashboard`.
+
+- `dashboard.env` is shared by the web and worker services. Set `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS`, `DJANGO_TRUST_PROXY=1`, `DJANGO_USE_WHITENOISE=1`, `DJANGO_DB_PATH=/var/lib/rrr/db.sqlite3`, `RRR_RUN_DIR=/var/lib/rrr/traces`, and `RRR_FIXTURE_MAP=/etc/rrr/fixture-ids.json`. Use your own dashboard hostname and its HTTPS origin for the host and CSRF settings.
+- `fixture-ids.json` is the synthetic fixture map. Both services mount it read-only. The `data/` mount holds SQLite and traces and must be writable by UID 10001.
+- `runner.env` is worker-only. Set `ANTHROPIC_API_KEY`, `RRR_TRANSPORT=stackone`, and `STACKONE_ACCOUNT_ID` for Gateway. For direct LangCare set `RRR_TRANSPORT=langcare`, `LANGCARE_MCP_URL`, and `LANGCARE_MCP_TOKEN`.
+- For StackOne, transfer the worker's authorized grant through a secure channel to `stackone-auth/stackone-oauth.json`. The directory and file must be owned by UID 10001 with modes 0700 and 0600 respectively. The web service has no access to this mount.
+
+Use the same Compose project name throughout. Build the image, initialize the shared database, and start the services from the repository root.
+
+```sh
+docker compose -p rrr-dashboard -f deploy/compose.yaml build dashboard
+docker compose -p rrr-dashboard -f deploy/compose.yaml run --rm dashboard python manage.py migrate
+docker compose -p rrr-dashboard -f deploy/compose.yaml run --rm dashboard python manage.py createsuperuser
+docker compose -p rrr-dashboard -f deploy/compose.yaml up -d
+```
+
+For an explicit rollback to direct LangCare, set `RRR_TRANSPORT=langcare` and supply its credentials in `runner.env`. When the queue is idle, recreate only the worker.
 
 ```sh
 docker compose -p rrr-dashboard -f deploy/compose.yaml up -d --no-deps --no-build --force-recreate worker
+```
+
+## Inspect saved evaluations
+
+Django reads completed run directories from `evals/output/` by default. Use `RRR_EVAL_DIR` to override that path locally. For Compose, copy each complete run directory to `evaluations/` under the deployment directory, preserving all relative paths. Verify the copy before exposing it to the dashboard, and grant UID 10001 read and traversal access. The web service mounts the archive read-only.
+
+Administrators can inspect case outcomes, citations, traces, exact historical prompts and prompt diffs in **Evaluations**. Keep the archive and worker traces private.
+
+For a web-only UI release, rebuild and recreate only the dashboard. The running worker continues on its current image.
+
+```sh
+docker compose -p rrr-dashboard -f deploy/compose.yaml up -d --build --no-deps dashboard
 ```

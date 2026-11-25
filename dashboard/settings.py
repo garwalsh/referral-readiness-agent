@@ -1,4 +1,4 @@
-"""Settings shared by the local dashboard and its future WSGI deployment."""
+"""Settings shared by the local dashboard and the hosted web and worker services."""
 
 import os
 from pathlib import Path

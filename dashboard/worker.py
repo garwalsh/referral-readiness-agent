@@ -1,4 +1,4 @@
-"""Claim a queued run and execute the unchanged CLI workflow outside HTTP requests."""
+"""Claim queued reviews and run the agent CLI outside the web process."""
 
 import json
 import os
