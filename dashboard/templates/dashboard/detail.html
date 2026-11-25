@@ -2,7 +2,7 @@
 {% load static %}
 {% block title %}Referral readiness review · RRR Agent{% endblock %}
 {% block content %}
-<div class="report-page">
+<div class="report-page" data-execution-mode="{{ execution.activity.mode }}">
 <header class="page-heading">
   <a class="page-back" href="{% url 'history' %}"><span aria-hidden="true">←</span> Run history</a>
   <h1>Referral readiness review</h1>
@@ -10,20 +10,32 @@
 <section class="panel report-summary run-overview" aria-labelledby="readiness-title">
   <div class="run-overview-main">
     <div>
-      {% if run.readiness %}
+      {% if not run.terminal %}
+      <div class="execution-activity" role="status" aria-atomic="true">
+        <div class="execution-heading">
+          <h2 id="readiness-title">{{ execution.activity.label }}</h2>
+          <span class="execution-dot" aria-hidden="true"></span>
+        </div>
+        <p id="execution-detail" class="secondary"{% if not execution.activity.detail %} hidden{% endif %}>{{ execution.activity.detail }}</p>
+      </div>
+      {% elif run.readiness %}
       <span class="status readiness-badge" data-status="{{ run.readiness }}">{{ run.readiness }}</span>
       <h2 id="readiness-title">{{ readiness_label|default:run.readiness }}</h2>
-      {% elif run.terminal %}
-      <h2 id="readiness-title">Documentation report unavailable</h2>
       {% else %}
-      <h2 id="readiness-title">Awaiting documentation report</h2>
+      <h2 id="readiness-title">Documentation report unavailable</h2>
       {% endif %}
     </div>
     <div class="run-execution">
       <span class="secondary">Execution</span>
-      <p id="run-state" aria-live="polite">{{ run.get_state_display }}</p>
+      <p id="run-state">{% if execution.activity.mode == 'waiting' %}Waiting{% else %}{{ execution.state }}{% endif %}</p>
+      {% if not run.terminal %}
+      <p class="execution-clock">Elapsed <time id="execution-elapsed" role="timer" data-elapsed-ms="{{ execution.elapsed_ms|default_if_none:'' }}">—</time></p>
+      {% endif %}
     </div>
   </div>
+  {% if not run.terminal %}
+  <p id="progress-error" class="execution-connection secondary" role="status" hidden>Live updates interrupted. Showing the last confirmed activity while reconnecting.</p>
+  {% endif %}
   {% if findings %}
   <dl class="requirement-counts" aria-label="Checklist summary">
     {% for item in requirement_counts %}
@@ -37,8 +49,10 @@
   <dl class="run-metadata report-metadata">
     <div><dt>Claude model</dt><dd>{{ run.model }}</dd></div>
     <div><dt>Review date</dt><dd>{{ run.review_date|date:"Y-m-d" }}</dd></div>
+    {% if run.terminal %}
     <div><dt>Duration</dt><dd>{% if run.duration_seconds != None %}{{ run.duration_seconds }} s{% else %}—{% endif %}</dd></div>
-    <div><dt>Tool calls</dt><dd>{% if run.terminal %}{{ run.tool_calls }}{% else %}—{% endif %}</dd></div>
+    <div><dt>Tool calls</dt><dd>{{ run.tool_calls }}</dd></div>
+    {% endif %}
   </dl>
   <dl class="report-identifiers">
     <div>
@@ -95,10 +109,13 @@
 {% endif %}
 <section class="panel timeline" aria-labelledby="timeline-title"
   {% if not run.terminal %}data-progress-url="{% url 'run_progress' run.pk %}"{% endif %}>
-  <h2 id="timeline-title">Execution timeline</h2>
-  <ol id="timeline-events" data-count="{{ events|length }}" aria-live="polite">
+  <div class="execution-heading">
+    <h2 id="timeline-title">Execution timeline</h2>
+    {% if not run.terminal %}<span class="execution-dot" aria-hidden="true"></span>{% endif %}
+  </div>
+  <ol id="timeline-events" data-count="{{ events|length }}">
   {% for event in events %}
-    <li>
+    <li{% if forloop.last and not run.terminal %} class="latest-event"{% endif %}>
       <details>
         <summary>
           <strong>{{ event.label }}</strong>
@@ -130,7 +147,6 @@
     <li class="secondary">{% if run.terminal %}No trace events were recorded.{% else %}Waiting for the first trace event.{% endif %}</li>
   {% endfor %}
   </ol>
-  <p id="progress-error" class="secondary" role="status" hidden>Progress is temporarily unavailable. Retrying.</p>
 </section>
 </div>
 <script src="{% static 'dashboard/copy-identifiers.js' %}" defer></script>

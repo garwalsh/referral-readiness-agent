@@ -21,6 +21,21 @@ The prompt asks Claude to treat clinical narratives as untrusted evidence, inter
 
 A completed, unfiltered search can establish a documentation gap even if it returns zero results. Incomplete retrieval leaves unsupported findings unknown. The JSONL trace under `logs/` records run metadata, tool parameters and durations, retrieved IDs, validation failures, and final statuses. Ordinary tool events omit clinical narratives. A rejected citation records its submitted excerpt, FHIR resource, requirement, and reason. If a text comparison failed, the event also retains the original compared attachments from that cited, patient-scoped resource.
 
+### Try the StackOne Gateway path locally
+
+The standalone agent can use a separate StackOne member OAuth grant. Use your existing LangCare linked account ID as `STACKONE_ACCOUNT_ID` in the environment or ignored `.env`. The project API key is unnecessary for this route.
+
+```sh
+python3 scripts/stackone.py login
+python3 scripts/stackone.py probe a34c2416-8263-4819-9acf-690e2e6fdd01
+RRR_TRANSPORT=stackone python3 scripts/run_agent.py a34c2416-8263-4819-9acf-690e2e6fdd01 \
+  --review-date 2026-11-25 --model claude-haiku-5-5
+```
+
+At StackOne consent, choose the project and existing LangCare account, grant only FHIR Search and FHIR Read, and leave **Load tools when needed** enabled. The local callback listens only on loopback during sign-in. The client stores the grant in `~/.config/rrr/stackone-oauth.json` with owner-only permissions and refreshes access as needed. If the grant expires or is revoked, run the login command again.
+
+Run the single-search probe before a full review. It prints the count, verifies the returned patient references, and shows the action run ID and Defender status when supplied. Full reviews record the selected transport and Gateway action metadata in the trace. Seat billing must be checked separately in StackOne. Direct LangCare remains the default and can be selected explicitly with `RRR_TRANSPORT=langcare`. The deployed worker continues to use its existing direct connection.
+
 ## Operations dashboard
 
 The Django dashboard has administrator sign-in and pages for run configuration, reports, and history. The configuration page reads patient IDs from the ignored `local-config/live-fixture-ids.json` map. Set `RRR_FIXTURE_MAP` to use a different copy. The default model options were verified against the existing Claude connection. `RRR_CLAUDE_MODELS` can select a comma-separated list of other verified IDs.

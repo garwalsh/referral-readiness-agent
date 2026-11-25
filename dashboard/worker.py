@@ -14,6 +14,8 @@ from scripts.reporting import Report
 from .forms import synthetic_patient_ids
 from .models import ReviewRun
 
+WORKER_TIMEOUT_ERROR = "The agent exceeded the worker time limit."
+
 
 def trace_path(run: ReviewRun) -> Path:
     return settings.RRR_RUN_DIR / f"{run.pk}.jsonl"
@@ -103,7 +105,7 @@ def execute_run(run: ReviewRun) -> None:
             else:
                 state = ReviewRun.State.COMPLETED
     except subprocess.TimeoutExpired:
-        error = "The agent exceeded the worker time limit."
+        error = WORKER_TIMEOUT_ERROR
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         # Suppress raw subprocess stderr, payloads, paths, and credentials.
         error = "The run configuration, report, or trace could not be verified."

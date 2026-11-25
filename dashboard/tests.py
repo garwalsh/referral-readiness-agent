@@ -96,7 +96,9 @@ class DashboardPagesTest(TestCase):
         self.assertEqual(run.state, ReviewRun.State.QUEUED)
         self.assertRedirects(response, reverse("run_detail", args=[run.id]))
         self.assertEqual(self.client.get(reverse("run_progress", args=[run.id])).json(),
-                         {"state": "Queued", "terminal": False, "events": []})
+                         {"state": "Queued", "terminal": False, "events": [], "elapsed_ms": None,
+                          "activity": {"mode": "queued", "label": "Waiting for the worker",
+                                       "detail": "This review is queued."}})
         self.client.logout()
         for name in ("run_detail", "run_progress"):
             self.assertEqual(self.client.get(reverse(name, args=[run.id])).status_code, 302)
@@ -175,10 +177,58 @@ class ReviewWorkerTest(TestCase):
         run = self.queue()
         self.client.force_login(self.admin)
         response = self.client.get(reverse("run_detail", args=[run.pk]))
-        self.assertContains(response, "Awaiting documentation report")
-        self.assertContains(response, 'id="run-state" aria-live="polite">Queued')
+        self.assertContains(response, "Waiting for the worker")
+        self.assertContains(response, 'id="run-state">Queued')
+        self.assertContains(response, 'id="execution-elapsed"')
+        self.assertContains(response, '<span class="execution-dot" aria-hidden="true"></span>', count=2)
         self.assertContains(response, "Waiting for the first trace event.")
         self.assertNotContains(response, "Checklist summary")
+
+    def test_progress_reports_only_observed_activity_and_measures_from_claim(self) -> None:
+        run = self.queue()
+        run = claim_next()
+        run.started_at = timezone.now() - timedelta(seconds=7)
+        run.save(update_fields=["started_at"])
+        self.client.force_login(self.admin)
+        url = reverse("run_progress", args=[run.pk])
+        path = trace_path(run)
+        snapshots = [
+            ({"event": "start"}, "running", "Agent running", "OK"),
+            ({"event": "connection_start"}, "waiting", "Connecting to clinical records", "Started"),
+            ({"event": "connection_finish", "outcome": "completed"}, "running", "Agent running", "OK"),
+            ({"event": "tool_start"}, "waiting", "Retrieving patient documentation", "Started"),
+            ({"event": "tool", "error": "Network stalled.", "timed_out": True},
+             "running", "Agent running", "Timed out"),
+            ({"event": "model_start"}, "waiting", "Reviewing documentation", "Started"),
+            ({"event": "model_finish", "outcome": "failed"}, "running", "Agent running", "Error"),
+            ({"event": "validation_start"}, "running", "Validating findings", "Started"),
+            ({"event": "validation_finish"}, "running", "Preparing readiness report", "OK"),
+        ]
+        for event, mode, label, status in snapshots:
+            with self.subTest(event=event):
+                with path.open("a") as trace:
+                    trace.write(json.dumps(event) + "\n")
+                latest = self.client.get(url).json()
+                self.assertEqual(latest["activity"]["label"], label)
+                self.assertEqual(latest["activity"]["mode"], mode)
+                self.assertEqual(latest["events"][-1]["status"], status)
+                self.assertGreaterEqual(latest["elapsed_ms"], 7000)
+                self.assertFalse(latest["terminal"])
+
+    def test_worker_timeout_is_terminal_and_keeps_the_error_message(self) -> None:
+        self.queue()
+        run = claim_next()
+        with patch("dashboard.worker.subprocess.run", side_effect=subprocess.TimeoutExpired([], 900)):
+            execute_run(run)
+        self.client.force_login(self.admin)
+        progress = self.client.get(reverse("run_progress", args=[run.pk])).json()
+        self.assertEqual(progress["state"], "Timed out")
+        self.assertEqual(progress["activity"]["mode"], "timed-out")
+        self.assertTrue(progress["terminal"])
+        detail = self.client.get(reverse("run_detail", args=[run.pk]))
+        self.assertContains(detail, "The agent exceeded the worker time limit.")
+        self.assertNotContains(detail, 'class="execution-dot"')
+        self.assertNotContains(detail, "data-progress-url")
 
     def test_citation_diagnostics_are_private_to_the_admin_run_detail(self) -> None:
         run = self.queue()

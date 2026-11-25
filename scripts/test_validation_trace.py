@@ -7,9 +7,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 
 from reporting import Report, Requirement
-from run_agent import main
+from run_agent import main, trace_operation
 
 PATIENT = "a349d267-f0bb-41a3-ba33-902d9b2fad5c"
 OTHER_PATIENT = "00000000-0000-4000-8000-000000000001"
@@ -100,6 +101,30 @@ class CitationTraceTests(unittest.TestCase):
         self.assertEqual(ecg.status.value, "PRESENT")
         self.assertFalse(any(event["event"] == "validation_error" for event in events))
         self.assertNotIn("12-LEAD ECG REPORT", json.dumps(events))
+
+    def test_connection_and_model_lifecycle_records_only_timing_and_outcome(self):
+        _, events, _ = self.review("Normal sinus rhythm.")
+        lifecycle = [event for event in events if event["event"].startswith(("connection_", "model_"))]
+        self.assertEqual([event["event"] for event in lifecycle], [
+            "connection_start", "connection_finish", "model_start", "model_finish", "model_start", "model_finish",
+        ])
+        for event in lifecycle:
+            if event["event"].endswith("_finish"):
+                self.assertEqual(event["outcome"], "completed")
+                self.assertGreaterEqual(event["duration_ms"], 0)
+                self.assertEqual(set(event), {"event", "timestamp", "outcome", "duration_ms"})
+            else:
+                self.assertEqual(set(event), {"event", "timestamp"})
+
+    def test_remote_timeout_retains_the_error_and_marks_operation_timed_out(self):
+        trace = StringIO()
+        with self.assertRaises(URLError):
+            with trace_operation(trace, "model"):
+                raise URLError(TimeoutError("Synthetic network timeout"))
+        start, finish = [json.loads(line) for line in trace.getvalue().splitlines()]
+        self.assertEqual(start["event"], "model_start")
+        self.assertEqual(finish["outcome"], "timed_out")
+        self.assertNotIn("Synthetic network timeout", trace.getvalue())
 
     def test_cross_patient_resource_never_enters_validation_or_trace(self):
         report, events, _ = self.review(WRONG_QUOTE, outside_patient=True, source="Private other-patient note")

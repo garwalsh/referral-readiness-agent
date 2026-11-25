@@ -9,12 +9,13 @@ import json
 import os
 import re
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from itertools import count
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from time import perf_counter
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, Iterator, TextIO
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, build_opener
@@ -267,6 +268,31 @@ def write_validation_error(
     write_event(trace, event)
 
 
+def timed_out(error: BaseException) -> bool:
+    return isinstance(error, TimeoutError) or (
+        isinstance(error, URLError) and isinstance(error.reason, TimeoutError)
+    )
+
+
+@contextmanager
+def trace_operation(trace: TextIO, operation: str) -> Iterator[None]:
+    """Record only timing and outcome around an external request."""
+    started = perf_counter()
+    write_event(trace, {"event": f"{operation}_start"})
+    outcome = "failed"
+    try:
+        yield
+    except Exception as error:
+        if timed_out(error):
+            outcome = "timed_out"
+        raise
+    else:
+        outcome = "completed"
+    finally:
+        write_event(trace, {"event": f"{operation}_finish", "outcome": outcome,
+                            "duration_ms": round((perf_counter() - started) * 1000, 1)})
+
+
 # Execution guardrails
 def trace_tool(tools: PatientTools, block: Json, trace: TextIO, remaining: int) -> Json:
     started = perf_counter()
@@ -295,6 +321,8 @@ def trace_tool(tools: PatientTools, block: Json, trace: TextIO, remaining: int) 
         else:
             message = f"Retrieval failed ({type(error).__name__})."
         entry["error"] = message
+        if timed_out(error):
+            entry["timed_out"] = True
         if entry["parameters"] is not None:
             tools.retrieval_errors.append(RetrievalError(
                 tool=entry["tool"], resource_type=entry["parameters"]["resourceType"], message=message
@@ -311,7 +339,8 @@ def run_loop(ask: Model, tools: PatientTools, review_date: date, trace: TextIO) 
         f"Review synthetic Patient/{tools.patient_id} as of {review_date.isoformat()}."}]
     remaining = MAX_TOOL_CALLS
     while True:
-        reply = ask(messages, remaining > 0)
+        with trace_operation(trace, "model"):
+            reply = ask(messages, remaining > 0)
         blocks = reply["content"]
         uses = [block for block in blocks if block["type"] == "tool_use"]
         if reply["stop_reason"] == "end_turn" and not uses:
@@ -356,7 +385,8 @@ def claude_client(key: str, model: str) -> Model:
 
 
 def settings() -> dict[str, str]:
-    names = ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "LANGCARE_MCP_URL", "LANGCARE_MCP_TOKEN")
+    names = ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "LANGCARE_MCP_URL", "LANGCARE_MCP_TOKEN",
+             "RRR_TRANSPORT", "STACKONE_ACCOUNT_ID")
     path = ROOT / ".env"
     values = {}
     if path.is_file():
@@ -366,6 +396,14 @@ def settings() -> dict[str, str]:
                 values[name.strip()] = value.strip().strip("\"'")
     values.update({name: os.environ[name] for name in names if os.environ.get(name)})
     return values
+
+
+def select_transport(config: dict[str, str], trace: TextIO) -> Transport:
+    if config.get("RRR_TRANSPORT", "langcare") == "stackone":
+        from stackone import connect_stackone
+        return connect_stackone(config["STACKONE_ACCOUNT_ID"],
+                                lambda event: write_event(trace, {"event": "gateway_action", **event}))
+    return connect_langcare(config["LANGCARE_MCP_URL"], config["LANGCARE_MCP_TOKEN"])
 
 
 def main() -> None:
@@ -381,7 +419,12 @@ def main() -> None:
     args = parser.parse_args()
 
     config = settings()
-    required = ("ANTHROPIC_API_KEY", "LANGCARE_MCP_URL", "LANGCARE_MCP_TOKEN")
+    mode = config.get("RRR_TRANSPORT", "langcare")
+    if mode not in {"langcare", "stackone"}:
+        parser.error("RRR_TRANSPORT must be langcare or stackone.")
+    required = ("ANTHROPIC_API_KEY",) + (
+        ("STACKONE_ACCOUNT_ID",) if mode == "stackone" else ("LANGCARE_MCP_URL", "LANGCARE_MCP_TOKEN")
+    )
     missing = [name for name in required if not config.get(name)]
     if missing:
         parser.error("Set these variables in the environment or project .env: " + ", ".join(missing))
@@ -401,12 +444,13 @@ def main() -> None:
     with output as trace:
         print(f"Claude model: {model}\nTrace: {trace.name}", file=sys.stderr)
         write_event(trace, {"event": "start", "run_id": run_id, "patient_id": patient_id,
-                            "review_date": args.review_date.isoformat(), "model": model})
+                            "review_date": args.review_date.isoformat(), "model": model, "transport": mode})
         draft, failure = None, None
         tools = None
         errors = []
         try:
-            transport = connect_langcare(config["LANGCARE_MCP_URL"], config["LANGCARE_MCP_TOKEN"])
+            with trace_operation(trace, "connection"):
+                transport = select_transport(config, trace)
             tools = PatientTools(patient_id, transport)
             draft = run_loop(claude_client(config["ANTHROPIC_API_KEY"], model), tools, args.review_date, trace)
         except (HTTPError, URLError, TimeoutError, ValueError, KeyError, TypeError, AttributeError) as error:
@@ -417,18 +461,19 @@ def main() -> None:
             else:
                 detail = type(error).__name__
             if tools is None:
-                failure = f"LangCare initialization failed ({detail})."
+                provider = "StackOne Gateway" if mode == "stackone" else "LangCare"
+                failure = f"{provider} initialization failed ({detail})."
                 errors.append(RetrievalError(tool="initialize", resource_type=None, message=failure))
             else:
                 failure = f"Checklist drafting failed ({detail})."
-            write_event(trace, {"event": "run_error", "message": failure})
+            write_event(trace, {"event": "run_error", "message": failure, "timed_out": timed_out(error)})
         write_event(trace, {"event": "validation_start"})
         report, validation_errors = build_report(
             draft, patient_id, args.review_date,
             tools.retrieved if tools else {}, tools.complete_searches if tools else set(),
             tools.retrieval_errors if tools else errors, failure,
             on_validation_error=lambda message, requirement, citation: write_validation_error(
-                trace, message, requirement, citation, (config["ANTHROPIC_API_KEY"], config["LANGCARE_MCP_TOKEN"])
+                trace, message, requirement, citation, (config["ANTHROPIC_API_KEY"], config.get("LANGCARE_MCP_TOKEN", ""))
             ),
         )
         write_event(trace, {"event": "validation_finish", "failures": len(validation_errors)})

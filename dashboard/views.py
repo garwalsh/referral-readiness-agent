@@ -8,12 +8,13 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods, require_safe
 
 from .forms import ReviewForm, synthetic_patient_ids
 from .models import ReviewRun
-from .worker import read_events
+from .worker import WORKER_TIMEOUT_ERROR, read_events
 
 administrator_required = user_passes_test(
     lambda user: user.is_active and user.is_staff,
@@ -39,6 +40,10 @@ READINESS_LABELS = {
 }
 EVENT_LABELS = {
     "start": "Agent started",
+    "connection_start": "Connecting to clinical records",
+    "connection_finish": "Clinical records connected",
+    "model_start": "Claude request started",
+    "model_finish": "Claude response received",
     "tool_start": "Retrieving clinical evidence",
     "tool": "Tool completed",
     "validation_start": "Validating report",
@@ -46,6 +51,15 @@ EVENT_LABELS = {
     "validation_error": "Validation issue",
     "run_error": "Agent error",
     "finish": "Readiness calculated",
+}
+STARTED_EVENTS = {"connection_start", "model_start", "tool_start", "validation_start"}
+FAILED_EVENTS = {
+    "tool": "Tool failed", "connection_finish": "Clinical records connection failed",
+    "model_finish": "Claude request failed",
+}
+TIMED_OUT_EVENTS = {
+    "tool": "Tool timed out", "connection_finish": "Clinical records connection timed out",
+    "model_finish": "Claude request timed out",
 }
 
 
@@ -61,14 +75,22 @@ def timeline(run: ReviewRun, *, include_citation_diagnostics: bool = False) -> l
             continue
         parameters = event.get("parameters") or {}
         error = event.get("error") or event.get("message")
-        status = "Error" if error else "OK"
-        if kind in {"tool_start", "validation_start"}:
+        label = EVENT_LABELS[kind]
+        status = "OK"
+        if event.get("timed_out") or event.get("outcome") == "timed_out":
+            label = TIMED_OUT_EVENTS.get(kind, label)
+            status = "Timed out"
+        elif error or event.get("outcome") == "failed":
+            label = FAILED_EVENTS.get(kind, label)
+            status = "Error"
+        elif kind in STARTED_EVENTS:
             status = "Started"
-        if kind == "validation_finish" and event.get("failures"):
+        elif kind == "validation_finish" and event.get("failures"):
             status = "Issues found"
         display = {
+            "kind": kind,
             "timestamp": event.get("timestamp", ""),
-            "label": "Tool failed" if kind == "tool" and error else EVENT_LABELS[kind],
+            "label": label,
             "tool": event.get("tool"),
             "resource_type": parameters.get("resourceType"),
             "parameters": {key: parameters[key] for key in ("resourceType", "queryParams", "id") if key in parameters},
@@ -92,6 +114,48 @@ def timeline(run: ReviewRun, *, include_citation_diagnostics: bool = False) -> l
             }
         events.append(display)
     return events
+
+
+RUNNING_ACTIVITIES = {
+    "connection_start": ("waiting", "Connecting to clinical records", "Waiting for LangCare to respond."),
+    "model_start": ("waiting", "Reviewing documentation", "Waiting for Claude to respond."),
+    "tool_start": ("waiting", "Retrieving patient documentation", "Waiting for the clinical records tool to respond."),
+    "validation_start": ("running", "Validating findings", ""),
+    "validation_error": ("running", "Validating findings", ""),
+    "validation_finish": ("running", "Preparing readiness report", ""),
+    "finish": ("running", "Preparing readiness report", ""),
+    "run_error": ("running", "Recording execution failure", ""),
+}
+
+
+def execution_progress(run: ReviewRun, events: list[dict]) -> dict:
+    elapsed = None
+    if run.started_at:
+        end = run.finished_at or timezone.now()
+        elapsed = max(0, int((end - run.started_at).total_seconds() * 1000))
+
+    state = run.get_state_display()
+    if run.state == ReviewRun.State.QUEUED:
+        activity = ("queued", "Waiting for the worker", "This review is queued.")
+    elif run.state == ReviewRun.State.COMPLETED:
+        activity = ("completed", "Execution completed", "")
+    elif run.state == ReviewRun.State.FAILED:
+        timeout = run.error == WORKER_TIMEOUT_ERROR or any(
+            event["kind"] == "run_error" and event["status"] == "Timed out" for event in events
+        )
+        if timeout:
+            state = "Timed out"
+            activity = ("timed-out", "Execution timed out", "")
+        else:
+            activity = ("failed", "Execution failed", "")
+    else:
+        last_event = events[-1]["kind"] if events else None
+        activity = RUNNING_ACTIVITIES.get(last_event, ("running", "Agent running", "Awaiting the next update."))
+    mode, label, detail = activity
+    return {
+        "state": state, "terminal": run.terminal, "elapsed_ms": elapsed,
+        "activity": {"mode": mode, "label": label, "detail": detail},
+    }
 
 
 @administrator_required
@@ -136,6 +200,8 @@ def run_detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
         for item in (run.report or {}).get("findings", [])
     ]
     counts = Counter(item["status"] for item in findings)
+    events = timeline(run, include_citation_diagnostics=True)
+    execution = execution_progress(run, events)
     return render(request, "dashboard/detail.html", {
         "active_page": "results", "run": run, "findings": findings,
         "readiness_label": READINESS_LABELS.get(run.readiness),
@@ -143,7 +209,7 @@ def run_detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
             {"status": status, "label": label, "count": counts[status]}
             for status, (label, _) in REQUIREMENT_STATUSES.items()
         ],
-        "events": timeline(run, include_citation_diagnostics=True),
+        "events": events, "execution": execution,
     })
 
 
@@ -152,10 +218,8 @@ def run_detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
 @require_safe
 def progress(request: HttpRequest, run_id: UUID) -> JsonResponse:
     run = get_object_or_404(ReviewRun, pk=run_id)
-    return JsonResponse({
-        "state": run.get_state_display(), "terminal": run.terminal,
-        "events": timeline(run),
-    })
+    events = timeline(run)
+    return JsonResponse({**execution_progress(run, events), "events": events})
 
 
 @administrator_required
