@@ -1,4 +1,5 @@
 {% extends 'dashboard/base.html' %}
+{% load static %}
 {% block title %}Evaluation details · RRR Agent{% endblock %}
 {% block content %}
 <header class="page-heading">
@@ -6,15 +7,25 @@
   <h1>Evaluation details</h1>
   <p class="identifier">{{ run.evaluation_run_id }}</p>
 </header>
-<section class="panel report-summary" aria-labelledby="metrics-title">
+<section class="panel evaluation-panel evaluation-metrics" aria-labelledby="metrics-title">
   <h2 id="metrics-title">Aggregate metrics</h2>
-  <dl class="run-metadata">
-    {% for label, rate in rates %}{% if rate %}
-    <div><dt>{{ label }}</dt><dd>{% include 'dashboard/evaluations/rate.html' %}</dd></div>
-    {% endif %}{% endfor %}
-    <div><dt>Tool calls</dt><dd>{{ run.metrics.total_tool_calls }}</dd></div>
-    <div><dt>Duration</dt><dd>{{ run.duration_seconds|floatformat:2 }} s</dd></div>
+  <dl class="run-metadata metric-grid">
+    {% for metric in metrics %}
+    <div class="metric{% if metric.key == 'strict_case_accuracy' %} metric-primary{% endif %}">
+      <dt>
+        <span>{{ metric.label }}</span>
+        <span class="metric-help">
+          <button type="button" class="metric-help-button" aria-label="About {{ metric.label }}" aria-describedby="metric-help-{{ metric.key }}">
+            <span aria-hidden="true">i</span>
+          </button>
+          <span class="metric-tooltip" id="metric-help-{{ metric.key }}" role="tooltip" hidden>{{ metric.explanation }}</span>
+        </span>
+      </dt>
+      <dd>{% if metric.rate %}{% include 'dashboard/evaluations/rate.html' with rate=metric.rate %}{% else %}{{ metric.value }}{% endif %}</dd>
+    </div>
+    {% endfor %}
   </dl>
+  <script defer src="{% static 'dashboard/metric-help.js' %}"></script>
   {% if run.metrics.per_requirement %}
   <details class="evaluation-disclosure">
     <summary>Accuracy by requirement</summary>

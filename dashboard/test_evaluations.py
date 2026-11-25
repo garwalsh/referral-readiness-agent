@@ -105,6 +105,34 @@ class EvaluationPageTests(TestCase):
         self.assertContains(detail, result["prompt_sha256"])
         self.assertContains(detail, "Referral reason · MISSING → PRESENT")
 
+    def test_aggregate_metrics_have_accessible_explanations_without_rewriting_artifact(self):
+        directory, result = self.write_run()
+        rate = {"count": 0, "total": 2, "percentage": 0}
+        for key in ("schema_success", "citation_reference_matches", "unknown_findings",
+                    "cases_with_retrieval_errors", "cases_with_execution_errors",
+                    "cases_with_validation_errors", "cases_with_guardrail_violations"):
+            result["metrics"][key] = rate
+        self.write_result(directory, result)
+        original = (directory / "results.json").read_bytes()
+
+        response = self.client.get(reverse("evaluation_detail", args=[result["evaluation_run_id"]]))
+        self.assertContains(response, 'role="tooltip" hidden', count=13)
+        self.assertContains(response, 'class="metric metric-primary"', count=1)
+        self.assertContains(response, 'aria-describedby="metric-help-citation_reference_matches"')
+        self.assertContains(response, 'id="metric-help-citation_reference_matches"')
+        self.assertContains(response, "Individual citations whose resource type and ID match")
+        self.assertContains(response, "out of five per evaluated case.")
+        self.assertContains(response, "FHIR tool dispatches")
+        self.assertContains(response, "2.12 s")
+        self.assertEqual((directory / "results.json").read_bytes(), original)
+
+    def test_missing_optional_metrics_do_not_produce_empty_tooltips(self):
+        _, result = self.write_run()
+        response = self.client.get(reverse("evaluation_detail", args=[result["evaluation_run_id"]]))
+        self.assertContains(response, 'role="tooltip" hidden', count=6)
+        self.assertNotContains(response, 'metric-help-schema_success')
+        self.assertContains(response, 'rel="icon" type="image/svg+xml"')
+
     def test_prompt_modes_and_exact_download_preserve_whitespace_and_hash(self):
         prompt = "\r\n  Leading spaces & <text>\r\nSecond line\t \n\n"
         directory, result = self.write_run(prompt)
