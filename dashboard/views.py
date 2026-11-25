@@ -43,8 +43,8 @@ EVENT_LABELS = {
     "start": "Agent started",
     "connection_start": "Connecting to clinical records",
     "connection_finish": "Clinical records connected",
-    "model_start": "Claude request started",
-    "model_finish": "Claude response received",
+    "model_start": "Model request started",
+    "model_finish": "Model response received",
     "tool_start": "Retrieving clinical evidence",
     "tool": "Tool completed",
     "gateway_action": "StackOne action recorded",
@@ -57,11 +57,11 @@ EVENT_LABELS = {
 STARTED_EVENTS = {"connection_start", "model_start", "tool_start", "validation_start"}
 FAILED_EVENTS = {
     "tool": "Tool failed", "connection_finish": "Clinical records connection failed",
-    "model_finish": "Claude request failed",
+    "model_finish": "Model request failed",
 }
 TIMED_OUT_EVENTS = {
     "tool": "Tool timed out", "connection_finish": "Clinical records connection timed out",
-    "model_finish": "Claude request timed out",
+    "model_finish": "Model request timed out",
 }
 
 
@@ -130,7 +130,7 @@ def timeline(run: ReviewRun, *, include_citation_diagnostics: bool = False) -> l
 
 RUNNING_ACTIVITIES = {
     "connection_start": ("waiting", "Connecting to clinical records", "Waiting for LangCare to respond."),
-    "model_start": ("waiting", "Reviewing documentation", "Waiting for Claude to respond."),
+    "model_start": ("waiting", "Reviewing documentation", "Waiting for the model to respond."),
     "tool_start": ("waiting", "Retrieving patient documentation", "Waiting for the clinical records tool to respond."),
     "validation_start": ("running", "Validating findings", ""),
     "validation_error": ("running", "Validating findings", ""),

@@ -201,10 +201,14 @@ class ReviewWorkerTest(TestCase):
             ({"event": "tool", "error": "Network stalled.", "timed_out": True},
              "running", "Agent running", "Timed out"),
             ({"event": "model_start"}, "waiting", "Reviewing documentation", "Started"),
+            ({"event": "model_finish", "outcome": "completed"}, "running", "Agent running", "OK"),
             ({"event": "model_finish", "outcome": "failed"}, "running", "Agent running", "Error"),
+            ({"event": "model_finish", "outcome": "timed_out"}, "running", "Agent running", "Timed out"),
             ({"event": "validation_start"}, "running", "Validating findings", "Started"),
             ({"event": "validation_finish"}, "running", "Preparing readiness report", "OK"),
         ]
+        model_labels = {"Started": "Model request started", "OK": "Model response received",
+                        "Error": "Model request failed", "Timed out": "Model request timed out"}
         for event, mode, label, status in snapshots:
             with self.subTest(event=event):
                 with path.open("a") as trace:
@@ -213,6 +217,10 @@ class ReviewWorkerTest(TestCase):
                 self.assertEqual(latest["activity"]["label"], label)
                 self.assertEqual(latest["activity"]["mode"], mode)
                 self.assertEqual(latest["events"][-1]["status"], status)
+                if event["event"] in {"model_start", "model_finish"}:
+                    self.assertEqual(latest["events"][-1]["label"], model_labels[status])
+                if event["event"] == "model_start":
+                    self.assertEqual(latest["activity"]["detail"], "Waiting for the model to respond.")
                 self.assertGreaterEqual(latest["elapsed_ms"], 7000)
                 self.assertFalse(latest["terminal"])
 

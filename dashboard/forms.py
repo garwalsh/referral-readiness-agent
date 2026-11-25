@@ -34,7 +34,7 @@ def synthetic_patient_ids() -> list[str]:
 
 class ReviewForm(forms.Form):
     patient_id = forms.ChoiceField(label="Synthetic patient")
-    model = forms.ChoiceField(label="Claude model")
+    model = forms.ChoiceField(label="Model")
     review_date = forms.DateField(
         label="Review date",
         initial=REVIEW_DATE,
