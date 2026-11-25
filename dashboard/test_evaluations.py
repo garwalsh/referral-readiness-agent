@@ -169,7 +169,10 @@ class EvaluationPageTests(TestCase):
         self.assertContains(response, "&lt;script&gt;alert(1)&lt;/script&gt;")
         self.assertNotContains(response, "<script>alert(1)</script>")
         self.assertNotContains(response, 'href="javascript:')
-        self.assertNotContains(response, "<img")
+        rendered = re.search(r'<div class="prompt-prose" id="formatted-prompt">(.*?)</div>',
+                             response.content.decode(), re.S)
+        self.assertIsNotNone(rendered)
+        self.assertNotIn("<img", rendered[1])
         self.assertContains(response, result["prompt_sha256"])
 
     def test_long_plain_prompt_gets_paragraph_spacing_without_rewording(self):

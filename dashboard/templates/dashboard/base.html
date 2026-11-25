@@ -13,7 +13,10 @@
 <a class="skip-link" href="#main-content">Skip to content</a>
 <div class="layout">
   <aside class="sidebar">
-    <a class="identity" href="{% url 'run_agent' %}">RRR Agent</a>
+    <a class="identity" href="{% url 'run_agent' %}">
+      <img class="identity-mark" src="{% static 'dashboard/favicon.svg' %}" width="34" height="34" alt="">
+      <span class="identity-name">Referral <span>Readiness Agent</span></span>
+    </a>
     <nav aria-label="Dashboard">
       <a href="{% url 'run_agent' %}"{% if active_page == 'run_agent' %} aria-current="page"{% endif %}>Run agent</a>
       <a href="{% url 'results' %}"{% if active_page == 'results' %} aria-current="page"{% endif %}>Run results</a>
