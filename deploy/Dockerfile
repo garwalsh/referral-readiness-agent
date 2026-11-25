@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r dashboard/requirements.txt -r deploy/requireme
 
 COPY manage.py ./
 COPY dashboard dashboard
-COPY scripts/run_agent.py scripts/reporting.py scripts/verify_langcare.py scripts/
+COPY scripts/run_agent.py scripts/reporting.py scripts/verify_langcare.py scripts/stackone.py scripts/
 RUN DJANGO_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
     DJANGO_USE_WHITENOISE=1 python manage.py collectstatic --noinput
 

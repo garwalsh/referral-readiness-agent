@@ -1,4 +1,5 @@
 """Offline coverage for the member OAuth token and FHIR action adapter."""
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 import json
 from pathlib import Path
@@ -43,6 +44,17 @@ class StackOneTests(unittest.TestCase):
                 self.assertEqual(refresh.call_args.args[1]["refresh_token"], "first")
             self.assertEqual(json.loads(path.read_text())["refresh_token"], "next")
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_concurrent_expired_reads_share_one_refresh(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "tokens.json"
+            save_tokens(path, {"client_id": "test", "access_token": "old", "refresh_token": "first",
+                               "expires_at": time() - 1})
+            response = {"access_token": "new", "token_type": "Bearer", "expires_in": 3600}
+            with patch("stackone.oauth_post", return_value=response) as refresh, ThreadPoolExecutor(2) as pool:
+                self.assertEqual(list(pool.map(access_token, (path, path))), ["new", "new"])
+                refresh.assert_called_once()
+            self.assertEqual(json.loads(path.read_text())["refresh_token"], "first")
 
     def test_missing_or_rejected_oauth_grant(self):
         with TemporaryDirectory() as directory:

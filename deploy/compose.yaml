@@ -31,6 +31,12 @@ services:
     env_file:
       - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/dashboard.env
       - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/runner.env
+    environment:
+      STACKONE_OAUTH_FILE: /var/lib/rrr-stackone/stackone-oauth.json
+    volumes:
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/data:/var/lib/rrr
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/fixture-ids.json:/etc/rrr/fixture-ids.json:ro
+      - ${RRR_DEPLOY_DIR:-/opt/rrr-dashboard}/stackone-auth:/var/lib/rrr-stackone
     command: python manage.py run_review_worker
     networks:
       - proxy

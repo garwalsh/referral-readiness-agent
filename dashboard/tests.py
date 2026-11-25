@@ -1,6 +1,7 @@
 """Authentication, CSRF, and configuration-page smoke tests."""
 
 import json
+import os
 import subprocess
 from datetime import date, timedelta
 from unittest.mock import patch
@@ -214,6 +215,39 @@ class ReviewWorkerTest(TestCase):
                 self.assertEqual(latest["events"][-1]["status"], status)
                 self.assertGreaterEqual(latest["elapsed_ms"], 7000)
                 self.assertFalse(latest["terminal"])
+
+    def test_stackone_worker_passes_only_selected_credentials_and_fails_closed(self) -> None:
+        run = self.queue()
+        claimed = claim_next()
+        config = {"RRR_TRANSPORT": "stackone", "STACKONE_ACCOUNT_ID": "account",
+                  "STACKONE_OAUTH_FILE": "/var/lib/rrr-stackone/stackone-oauth.json",
+                  "LANGCARE_MCP_TOKEN": "unused-fallback", "LANGCARE_MCP_URL": "https://example.test"}
+        result = subprocess.CompletedProcess([], 1, stdout="", stderr="private OAuth details")
+        with patch.dict(os.environ, config, clear=True), patch("dashboard.worker.subprocess.run", return_value=result) as launch:
+            execute_run(claimed)
+        launch.assert_called_once()
+        child_env = launch.call_args.kwargs["env"]
+        self.assertEqual(child_env["RRR_TRANSPORT"], "stackone")
+        self.assertEqual(child_env["STACKONE_OAUTH_FILE"], config["STACKONE_OAUTH_FILE"])
+        self.assertNotIn("LANGCARE_MCP_TOKEN", child_env)
+        self.assertNotIn("LANGCARE_MCP_URL", child_env)
+        run.refresh_from_db()
+        self.assertEqual(run.state, ReviewRun.State.FAILED)
+        self.assertNotIn("private OAuth details", run.error)
+
+    def test_run_detail_shows_transport_and_gateway_log_reference(self) -> None:
+        run = self.queue()
+        events = [
+            {"event": "start", "transport": "stackone"},
+            {"event": "gateway_action", "action": "fhir_search", "action_run_id": "probe-id",
+             "defender_applied": True, "defender_risk": "low"},
+        ]
+        trace_path(run).write_text("".join(json.dumps(event) + "\n" for event in events))
+        self.client.force_login(self.admin)
+        detail = self.client.get(reverse("run_detail", args=[run.pk]))
+        self.assertContains(detail, "StackOne Gateway")
+        self.assertContains(detail, "Action run ID · probe-id")
+        self.assertContains(detail, "Response scanned")
 
     def test_worker_timeout_is_terminal_and_keeps_the_error_message(self) -> None:
         self.queue()

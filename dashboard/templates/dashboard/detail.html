@@ -46,9 +46,12 @@
   </dl>
   {% endif %}
   {% if run.error %}<p class="notice" role="status">{{ run.error }}</p>{% endif %}
-  <dl class="run-metadata report-metadata">
+  <dl class="run-metadata report-metadata{% if transport_label %} with-transport{% endif %}">
     <div><dt>Claude model</dt><dd>{{ run.model }}</dd></div>
     <div><dt>Review date</dt><dd>{{ run.review_date|date:"Y-m-d" }}</dd></div>
+    {% if transport_label %}
+    <div><dt>Integration transport</dt><dd>{{ transport_label }}</dd></div>
+    {% endif %}
     {% if run.terminal %}
     <div><dt>Duration</dt><dd>{% if run.duration_seconds != None %}{{ run.duration_seconds }} s{% else %}—{% endif %}</dd></div>
     <div><dt>Tool calls</dt><dd>{{ run.tool_calls }}</dd></div>

@@ -34,7 +34,7 @@ RRR_TRANSPORT=stackone python3 scripts/run_agent.py a34c2416-8263-4819-9acf-690e
 
 At StackOne consent, choose the project and existing LangCare account, grant only FHIR Search and FHIR Read, and leave **Load tools when needed** enabled. The local callback listens only on loopback during sign-in. The client stores the grant in `~/.config/rrr/stackone-oauth.json` with owner-only permissions and refreshes access as needed. If the grant expires or is revoked, run the login command again.
 
-Run the single-search probe before a full review. It prints the count, verifies the returned patient references, and shows the action run ID and Defender status when supplied. Full reviews record the selected transport and Gateway action metadata in the trace. Seat billing must be checked separately in StackOne. Direct LangCare remains the default and can be selected explicitly with `RRR_TRANSPORT=langcare`. The deployed worker continues to use its existing direct connection.
+Run the single-search probe before a full review. It prints the count, verifies the returned patient references, and shows the action run ID and Defender status when supplied. Full reviews record the selected transport and Gateway action metadata in the trace. Seat billing must be checked separately in StackOne. Direct LangCare remains the default and can be selected explicitly with `RRR_TRANSPORT=langcare`. The deployed worker is configured separately. See the [deployment notes](deploy/README.md) for its active route and rollback procedure.
 
 ## Operations dashboard
 

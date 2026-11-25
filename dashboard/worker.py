@@ -75,10 +75,15 @@ def execute_run(run: ReviewRun) -> None:
             "--review-date", run.review_date.isoformat(), "--model", run.model,
             "--run-id", str(run.pk), "--trace-path", str(trace_path(run)),
         ]
-        # The agent needs its own credentials, never Django's signing key.
-        allowed = ("ANTHROPIC_API_KEY", "LANGCARE_MCP_URL", "LANGCARE_MCP_TOKEN",
-                   "SSL_CERT_FILE", "SSL_CERT_DIR")
-        env = {name: os.environ[name] for name in allowed if name in os.environ}
+        # Supply only the credentials for the selected route.
+        transport = os.environ.get("RRR_TRANSPORT", "langcare")
+        common = ("ANTHROPIC_API_KEY", "SSL_CERT_FILE", "SSL_CERT_DIR")
+        credentials = {
+            "langcare": ("LANGCARE_MCP_URL", "LANGCARE_MCP_TOKEN"),
+            "stackone": ("STACKONE_ACCOUNT_ID", "STACKONE_OAUTH_FILE"),
+        }.get(transport, ())
+        env = {name: os.environ[name] for name in (*common, *credentials) if name in os.environ}
+        env["RRR_TRANSPORT"] = transport
         result = subprocess.run(
             command, cwd=settings.BASE_DIR, env=env, capture_output=True, text=True,
             timeout=settings.RRR_RUN_TIMEOUT, check=False,
@@ -91,6 +96,7 @@ def execute_run(run: ReviewRun) -> None:
             if (
                 not events or events[0].get("event") != "start" or events[0].get("run_id") != str(run.pk)
                 or events[0].get("model") != run.model
+                or events[0].get("transport", "langcare") != transport
                 or events[0].get("patient_id") != str(run.patient_id)
                 or events[0].get("review_date") != run.review_date.isoformat()
                 or events[-1].get("event") != "finish" or events[-1].get("run_id") != str(run.pk)

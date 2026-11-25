@@ -52,7 +52,8 @@ def oauth_post(operation: str, fields: dict, *, registration: bool = False) -> d
 
 
 def private_path() -> Path:
-    return Path.home() / ".config" / "rrr" / "stackone-oauth.json"
+    configured = os.environ.get("STACKONE_OAUTH_FILE")
+    return Path(configured) if configured else Path.home() / ".config" / "rrr" / "stackone-oauth.json"
 
 
 @contextmanager
@@ -91,7 +92,7 @@ def credential_record(client_id: str, response: dict, old_refresh: str | None = 
             "expires_at": time() + remaining}
 
 
-def access_token(path: Path) -> str:
+def access_token(path: Path, *, force_refresh: bool = False) -> str:
     with locked_store(path):
         try:
             with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), encoding="utf-8") as file:
@@ -105,7 +106,7 @@ def access_token(path: Path) -> str:
             expires = float(record["expires_at"])
         except (OSError, ValueError, KeyError, TypeError):
             raise ValueError(f"StackOne OAuth credentials are missing or unreadable. {LOGIN}") from None
-        if expires > time() + 45:
+        if not force_refresh and expires > time() + 45:
             return access
         response = oauth_post("token", {"grant_type": "refresh_token", "client_id": client,
                                         "refresh_token": refresh, "resource": ENDPOINT})

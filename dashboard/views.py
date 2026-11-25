@@ -33,6 +33,7 @@ REQUIREMENT_STATUSES = {
     "OUTDATED": ("Outdated", "◷"),
     "UNKNOWN": ("Unresolved", "?"),
 }
+TRANSPORT_LABELS = {"langcare": "Direct LangCare", "stackone": "StackOne Gateway"}
 READINESS_LABELS = {
     "READY": "Documentation requirements satisfied",
     "NEEDS_REVIEW": "Documentation needs review",
@@ -46,6 +47,7 @@ EVENT_LABELS = {
     "model_finish": "Claude response received",
     "tool_start": "Retrieving clinical evidence",
     "tool": "Tool completed",
+    "gateway_action": "StackOne action recorded",
     "validation_start": "Validating report",
     "validation_finish": "Report validation finished",
     "validation_error": "Validation issue",
@@ -100,6 +102,16 @@ def timeline(run: ReviewRun, *, include_citation_diagnostics: bool = False) -> l
             "error": error,
             "readiness": event.get("readiness"),
         }
+        if kind == "start" and event.get("transport") in TRANSPORT_LABELS:
+            display["transport"] = event["transport"]
+        if kind == "gateway_action":
+            display["parameters"] = {
+                label: event[key] for key, label in (
+                    ("action", "Action"), ("action_run_id", "Action run ID"), ("defender_risk", "Defender risk")
+                ) if key in event
+            }
+            if event.get("defender_applied"):
+                display["parameters"]["Defender"] = "Response scanned"
         citation = event.get("citation") if include_citation_diagnostics and kind == "validation_error" else None
         if isinstance(citation, dict):
             # JSON string notation makes line endings, tabs and leading spaces visible in HTML.
@@ -151,6 +163,8 @@ def execution_progress(run: ReviewRun, events: list[dict]) -> dict:
     else:
         last_event = events[-1]["kind"] if events else None
         activity = RUNNING_ACTIVITIES.get(last_event, ("running", "Agent running", "Awaiting the next update."))
+        if last_event == "connection_start" and events[0].get("transport") == "stackone":
+            activity = (*activity[:2], "Waiting for StackOne Gateway to respond.")
     mode, label, detail = activity
     return {
         "state": state, "terminal": run.terminal, "elapsed_ms": elapsed,
@@ -210,6 +224,7 @@ def run_detail(request: HttpRequest, run_id: UUID) -> HttpResponse:
             for status, (label, _) in REQUIREMENT_STATUSES.items()
         ],
         "events": events, "execution": execution,
+        "transport_label": TRANSPORT_LABELS.get(events[0].get("transport")) if events else None,
     })
 
 
